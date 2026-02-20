@@ -1,7 +1,117 @@
-from pydantic import BaseModel, Field
-from typing import Dict, Literal
+"""
+Domain schemas for alert configuration, VLM results, and alert history.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from typing import Dict, List, Literal, Optional
+
+from pydantic import BaseModel, Field, field_validator
+
+
+# ------------------------------------------------------------------ #
+# Enumerations
+# ------------------------------------------------------------------ #
+
+class AlertSeverity(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+# ------------------------------------------------------------------ #
+# Alert configuration (per-alert, stored in resources/agents.json)
+# ------------------------------------------------------------------ #
+
+class EscalationConfig(BaseModel):
+    """Escalation rule: after N consecutive YES detections, fire extra tools."""
+    threshold_consecutive: int = Field(
+        default=3,
+        ge=2,
+        description="Number of consecutive YES detections before escalation",
+    )
+    additional_tools: List[str] = Field(
+        default_factory=list,
+        description="Extra tool names to invoke on escalation",
+    )
+
+
+class AlertConfig(BaseModel):
+    """
+    Full configuration for a single named alert.
+
+    Example JSON (resources/agents.json entry):
+    {
+        "name": "Fire Detection",
+        "prompt": "Is there visible fire or smoke in the image?",
+        "enabled": true,
+        "severity": "critical",
+        "cooldown_seconds": 60,
+        "tools": ["log_alert", "send_email", "capture_snapshot"],
+        "escalation": {"threshold_consecutive": 3, "additional_tools": ["trigger_webhook"]}
+    }
+    """
+
+    name: str = Field(..., min_length=1, max_length=64)
+    prompt: str = Field(..., min_length=5, max_length=500)
+    enabled: bool = True
+    severity: AlertSeverity = AlertSeverity.MEDIUM
+    # Minimum seconds between consecutive action executions for this alert.
+    # Within the cooldown window, detections are still recorded but actions
+    # are suppressed to prevent notification floods.
+    cooldown_seconds: float = Field(default=60.0, ge=0)
+    # Tool names to invoke when this alert fires (answer == YES and cooldown passed).
+    tools: List[str] = Field(default_factory=lambda: ["log_alert"])
+    escalation: Optional[EscalationConfig] = None
+
+    @field_validator("name")
+    @classmethod
+    def name_no_special_chars(cls, v: str) -> str:
+        import re
+        if not re.match(r"^[\w\s\-\.]+$", v):
+            raise ValueError("Alert name may only contain letters, digits, spaces, hyphens, dots, and underscores")
+        return v
+
+
+# ------------------------------------------------------------------ #
+# VLM result (single alert answer)
+# ------------------------------------------------------------------ #
 
 class AgentResult(BaseModel):
-    """Structured Yes/No response for a single agent question"""
-    answer: Literal["YES", "NO"] = Field(..., description="Must be exactly YES or NO")
+    """Structured YES/NO response returned by the VLM for one alert question."""
+    answer: Literal["YES", "NO"] = Field(..., description="Exactly YES or NO")
     reason: str = Field(..., description="Brief explanation for the answer")
+
+
+# ------------------------------------------------------------------ #
+# Alert event (history entry)
+# ------------------------------------------------------------------ #
+
+class AlertEvent(BaseModel):
+    """A single alert detection event stored in history."""
+    event_id: str
+    timestamp: datetime
+    stream_id: str
+    alert_name: str
+    severity: AlertSeverity
+    answer: Literal["YES", "NO"]
+    reason: str
+    consecutive_count: int = 1
+    actions_taken: List[str] = Field(default_factory=list)
+    escalated: bool = False
+    snapshot_path: Optional[str] = None
+
+
+# ------------------------------------------------------------------ #
+# Per-alert runtime state (for deduplication / escalation tracking)
+# ------------------------------------------------------------------ #
+
+class AlertRuntimeState(BaseModel):
+    """Runtime tracking state for one alert on one stream."""
+    last_answer: Literal["YES", "NO"] = "NO"
+    consecutive_yes: int = 0
+    last_action_ts: Optional[float] = None   # monotonic time of last tool execution
+    last_transition_ts: Optional[float] = None  # monotonic time of last YES→NO or NO→YES

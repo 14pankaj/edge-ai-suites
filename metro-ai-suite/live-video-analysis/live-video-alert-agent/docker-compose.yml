@@ -62,18 +62,79 @@ services:
     ports:
       - "${PORT:-9000}:${PORT:-9000}"
     environment:
+      # ---- proxy ----
       - no_proxy=${no_proxy}
       - NO_PROXY=${no_proxy}
       - http_proxy=${http_proxy}
       - HTTP_PROXY=${http_proxy}
       - https_proxy=${https_proxy}
       - HTTPS_PROXY=${https_proxy}
-      - RTSP_URL=${RTSP_URL}
-      - VLM_URL=${VLM_URL:-http://localhost:8000/v3}
-      - MODEL_NAME=${MODEL_NAME:-Phi-3.5-Vision}
+
+      # ---- core ----
       - PORT=${PORT:-9000}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - RTSP_URL=${RTSP_URL}
+
+      # ---- VLM / OVMS ----
+      - VLM_URL=${VLM_URL:-http://localhost:8000/v3}
+      - VLM_API_KEY=${VLM_API_KEY:-}
+      - MODEL_NAME=${MODEL_NAME:-Phi-3.5-Vision}
+      - VLM_IMAGE_MAX_DIM=${VLM_IMAGE_MAX_DIM:-448}
+      - VLM_JPEG_QUALITY=${VLM_JPEG_QUALITY:-70}
+      - VLM_TIMEOUT=${VLM_TIMEOUT:-30}
+      - VLM_MAX_RETRIES=${VLM_MAX_RETRIES:-2}
+      - VLM_MAX_TOKENS=${VLM_MAX_TOKENS:-800}
+
+      # ---- stream capture ----
+      - ANALYSIS_INTERVAL=${ANALYSIS_INTERVAL:-5}
+      - CAPTURE_FPS=${CAPTURE_FPS:-0}
+      - CAPTURE_RESIZE_HEIGHT=${CAPTURE_RESIZE_HEIGHT:-720}
+
+      # ---- API auth (leave empty to disable) ----
+      - API_KEY=${API_KEY:-}
+
+      # ---- Google ADK (optional; falls back to rule-based if unset) ----
+      - USE_ADK=${USE_ADK:-false}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ADK_MODEL=${ADK_MODEL:-gemini-2.0-flash-lite}
+
+      # ---- alert history ----
+      - ALERT_HISTORY_SIZE=${ALERT_HISTORY_SIZE:-500}
+
+      # ---- snapshot tool ----
+      - SNAPSHOT_DIR=/app/snapshots
+
+      # ---- email action tool (optional) ----
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_ALERT_RECIPIENT=${SMTP_ALERT_RECIPIENT:-}
+
+      # ---- webhook action tool (optional) ----
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+
+      # ---- MQTT action tool (optional) ----
+      - MQTT_BROKER=${MQTT_BROKER:-}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - MQTT_USER=${MQTT_USER:-}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
+      - MQTT_BASE_TOPIC=${MQTT_BASE_TOPIC:-alerts/live-video}
+
     volumes:
-      - ./resources:/temp/resources
+      - ./resources:/app/resources
+      # Persist alert snapshots across container restarts
+      - snapshots:/app/snapshots
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${PORT:-9000}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
     depends_on:
       ovms:
         condition: service_healthy
@@ -81,3 +142,5 @@ services:
 
 volumes:
   ovms-models:
+  # Named volume for alert snapshot images
+  snapshots:
