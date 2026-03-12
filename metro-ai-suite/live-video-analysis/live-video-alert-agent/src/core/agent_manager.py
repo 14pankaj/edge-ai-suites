@@ -8,7 +8,7 @@ Key improvements
 ----------------
 - Concurrent stream analysis: all streams are analysed in parallel via
   asyncio.gather(), so cycle time = max(VLM latency) not sum(VLM latency).
-- Per-stream independent analysis loops (Option B from the review).
+- Per-stream independent analysis loops 
 - AlertStateManager integration: deduplication, cooldown, escalation.
 - AlertActionAgent integration: Google ADK tool-calling (or rule-based fallback).
 - Snapshot tool callback registration per stream.
