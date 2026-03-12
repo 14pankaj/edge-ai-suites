@@ -29,7 +29,7 @@ a configurable agentic action pipeline.
 
 **Dynamic Alert Prompts**: Define and modify alerts (prompts) in real-time through the UI or REST API without redeploying.
 
-**Agentic Tool Dispatch**: When an alert fires, an action agent decides which tools to invoke — powered by Google ADK, a local LLM (Ollama, LM Studio, vLLM), or deterministic rule-based execution.
+**Agentic Tool Dispatch**: When an alert fires, an action agent decides which tools to invoke — powered by Google ADK, an OVMS-hosted local LLM, or deterministic rule-based execution.
 
 **Alert State Management**: Per-stream, per-alert cooldowns and consecutive-detection escalation suppress noise while ensuring persistent conditions trigger escalated responses.
 

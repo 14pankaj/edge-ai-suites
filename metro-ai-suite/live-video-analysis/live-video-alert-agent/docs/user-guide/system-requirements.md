@@ -43,15 +43,12 @@ export MODEL_NAME=InternVL2-2B
 ## Optional: Local LLM for Agentic Dispatch
 
 To use `USE_LOCAL_LLM=true` without installing a separate service, a text-only
-model can be served alongside the vision model by a second OVMS instance, or
-you can use any OpenAI-compatible server on the same host:
+model can be served alongside the vision model by OVMS using a multi-model
+configuration:
 
 | Backend | Default URL |
 |---|---|
-| Ollama | `http://localhost:11434/v1` |
-| LM Studio | `http://localhost:1234/v1` |
-| vLLM | `http://localhost:8080/v1` |
-| OVMS text model | `http://localhost:8001/v3` |
+| OVMS text model | `http://ovms:8000/v3` |
 
 No additional Python packages are required — the `openai` SDK is already included.
 

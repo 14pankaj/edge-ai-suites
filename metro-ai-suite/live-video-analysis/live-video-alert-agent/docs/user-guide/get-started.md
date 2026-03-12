@@ -62,12 +62,11 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
    export ADK_MODEL=gemini-2.0-flash-lite   # default
    ```
 
-   *Option B — Local LLM (fully offline, e.g. Ollama):*
+  *Option B — Local LLM via OVMS (fully offline):*
    ```bash
-   # Start Ollama: ollama run llama3.2
    export USE_LOCAL_LLM=true
-   export LOCAL_LLM_URL=http://localhost:11434/v1
-   export LOCAL_LLM_MODEL=llama3.2
+  export LOCAL_LLM_URL=http://ovms:8000/v3
+  export LOCAL_LLM_MODEL=Phi-4-mini-instruct
    ```
 
    *Option C — Rule-based (default, no LLM needed):*

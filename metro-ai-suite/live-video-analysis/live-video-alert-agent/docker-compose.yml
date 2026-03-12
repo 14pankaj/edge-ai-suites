@@ -11,13 +11,49 @@ services:
       - ovms-models:/models
     command: sh -c "chown -R 5000:5000 /models && chmod -R 755 /models"
 
+  ovms-config:
+    image: busybox:latest
+    container_name: ovms-config
+    user: "0:0"
+    depends_on:
+      ovms-init:
+        condition: service_completed_successfully
+    volumes:
+      - ovms-models:/models
+    command:
+      - sh
+      - -c
+      - |
+        cat >/models/config_all.json <<EOF
+        {
+          "model_config_list": [
+            {
+              "config": {
+                "name": "${MODEL_NAME:-Phi-3.5-Vision}",
+                "source_model": "${OVMS_VLM_SOURCE_MODEL:-OpenVINO/Phi-3.5-vision-instruct-int4-ov}",
+                "target_device": "${OVMS_TARGET_DEVICE:-CPU}"
+              }
+            },
+            {
+              "config": {
+                "name": "${LOCAL_LLM_MODEL:-Phi-4-mini-instruct}",
+                "source_model": "${OVMS_LLM_SOURCE_MODEL:-OpenVINO/Phi-4-mini-instruct-int4-ov}",
+                "target_device": "${OVMS_TARGET_DEVICE:-CPU}"
+              }
+            }
+          ]
+        }
+        EOF
+        chown 5000:5000 /models/config_all.json
+        chmod 644 /models/config_all.json
+
   ovms:
     image: openvino/model_server:2025.4.1
     container_name: ovms-vlm
     user: "5000:5000" 
     restart: unless-stopped
     depends_on:
-      ovms-init:
+      ovms-config:
         condition: service_completed_successfully
     ports:
       - "8000:8000"
@@ -29,23 +65,18 @@ services:
       - https_proxy=${https_proxy}
       - HTTPS_PROXY=${https_proxy}
       - HF_TOKEN=${HF_TOKEN}
-      - OVMS_SOURCE_MODEL=${OVMS_SOURCE_MODEL:-OpenVINO/Phi-3.5-vision-instruct-int4-ov}
+      - OVMS_VLM_SOURCE_MODEL=${OVMS_VLM_SOURCE_MODEL:-OpenVINO/Phi-3.5-vision-instruct-int4-ov}
+      - OVMS_LLM_SOURCE_MODEL=${OVMS_LLM_SOURCE_MODEL:-OpenVINO/Phi-4-mini-instruct-int4-ov}
+      - OVMS_TARGET_DEVICE=${OVMS_TARGET_DEVICE:-CPU}
       - MODEL_NAME=${MODEL_NAME:-Phi-3.5-Vision}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-Phi-4-mini-instruct}
     volumes:
       - ovms-models:/models
     command:
       - --rest_port
       - "8000"
-      - --source_model
-      - "${OVMS_SOURCE_MODEL:-OpenVINO/Phi-3.5-vision-instruct-int4-ov}"
-      - --model_repository_path
-      - "/models"
-      - --model_name
-      - "${MODEL_NAME:-Phi-3.5-Vision}"
-      - --task
-      - "text_generation"
-      - --pipeline_type
-      - "VLM"
+      - --config_path
+      - "/models/config_all.json"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/config"]
       interval: 10s
@@ -97,10 +128,10 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - ADK_MODEL=${ADK_MODEL:-gemini-2.0-flash-lite}
 
-      # ---- Local LLM (optional; OpenAI-compatible endpoint, e.g. Ollama / LM Studio) ----
+      # ---- Local LLM (optional; defaults to OVMS text model endpoint) ----
       - USE_LOCAL_LLM=${USE_LOCAL_LLM:-false}
-      - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://host.docker.internal:11434/v1}
-      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-llama3.2}
+      - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://ovms:8000/v3}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-Phi-4-mini-instruct}
       - LOCAL_LLM_API_KEY=${LOCAL_LLM_API_KEY:-local}
       - LOCAL_LLM_TIMEOUT=${LOCAL_LLM_TIMEOUT:-30}
 
@@ -133,10 +164,6 @@ services:
       - ./resources:/app/resources
       # Persist alert snapshots across container restarts
       - snapshots:/app/snapshots
-
-    # Allow container-to-host access for local LLM endpoints on Linux hosts.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:${PORT:-9000}/health"]
