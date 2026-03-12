@@ -1,3 +1,6 @@
+# Copyright (C) 2025 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 """
 trigger_webhook tool — HTTP POST to a configured external endpoint.
 

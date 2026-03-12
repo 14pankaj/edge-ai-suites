@@ -1,3 +1,6 @@
+# Copyright (C) 2025 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 # Action tools exposed to the ADK alert agent
 from .log_tool import log_alert
 from .email_tool import send_email_alert

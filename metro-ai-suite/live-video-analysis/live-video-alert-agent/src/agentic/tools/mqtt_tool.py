@@ -1,3 +1,6 @@
+# Copyright (C) 2025 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 """
 publish_mqtt tool — publishes alert notifications to an MQTT broker.
 
