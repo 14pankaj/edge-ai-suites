@@ -1,3 +1,6 @@
+# Copyright (C) 2025 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 """
 log_alert tool — records an alert event to the application log and the
 in-memory history managed by AlertStateManager.

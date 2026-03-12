@@ -1,3 +1,6 @@
+# Copyright (C) 2025 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 # ---------------------------------------------------------------------------
 # Stage 1 — dependency installer (uses uv for fast, reproducible installs)
 # ---------------------------------------------------------------------------

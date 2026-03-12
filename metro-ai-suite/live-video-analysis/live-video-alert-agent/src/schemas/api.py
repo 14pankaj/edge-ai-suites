@@ -1,3 +1,6 @@
+# Copyright (C) 2025 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 """
 API request and response schemas (Pydantic models for all FastAPI endpoints).
 """
