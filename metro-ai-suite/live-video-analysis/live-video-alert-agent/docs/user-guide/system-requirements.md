@@ -1,6 +1,6 @@
 # System Requirements
 
-This page summarizes the recommended environment for running Live Video Alert.
+This page summarizes the recommended environment for running Live Video Alert Agent.
 
 ## Operating Systems
 
@@ -26,11 +26,10 @@ This page summarizes the recommended environment for running Live Video Alert.
 Default ports (configurable via environment variables):
 
 - `PORT=9000` (Dashboard UI and REST API)
-- `METRICS_PORT=9090` (Live metrics WebSocket service)
 
 ## Model Requirements
 
-The application automatically downloads VLM models on first run (~2GB). Supported models:
+The application automatically downloads VLM models on first run (~2 GB). Supported models:
 
 - `OpenVINO/Phi-3.5-vision-instruct-int4-ov` (default)
 - `OpenVINO/InternVL2-2B-int4-ov` (alternative)
@@ -41,6 +40,22 @@ export OVMS_SOURCE_MODEL=OpenVINO/InternVL2-2B-int4-ov
 export MODEL_NAME=InternVL2-2B
 ```
 
+## Optional: Local LLM for Agentic Dispatch
+
+To use `USE_LOCAL_LLM=true` without installing a separate service, a text-only
+model can be served alongside the vision model by a second OVMS instance, or
+you can use any OpenAI-compatible server on the same host:
+
+| Backend | Default URL |
+|---|---|
+| Ollama | `http://localhost:11434/v1` |
+| LM Studio | `http://localhost:1234/v1` |
+| vLLM | `http://localhost:8080/v1` |
+| OVMS text model | `http://localhost:8001/v3` |
+
+No additional Python packages are required — the `openai` SDK is already included.
+
 ## Validation
 
-Proceed to [Get Started](./get-started.md) once Docker is installed and internet connectivity is available for model downloads.
+Proceed to [Get Started](./get-started.md) once Docker is installed and internet
+connectivity is available for model downloads.

@@ -86,6 +86,28 @@ class Settings:
     ADK_MODEL: str = os.getenv("ADK_MODEL", "gemini-2.0-flash-lite")
 
     # ------------------------------------------------------------------ #
+    # Agentic framework — Local LLM (OpenAI-compatible endpoint)
+    # ------------------------------------------------------------------ #
+    # Set USE_LOCAL_LLM=true to use a locally hosted text LLM instead of
+    # Google ADK.  USE_ADK takes precedence when both are true.
+    # Compatible backends: Ollama, LM Studio, vLLM, OVMS text model, etc.
+    USE_LOCAL_LLM: bool = _bool("USE_LOCAL_LLM", False)
+
+    # Base URL of the OpenAI-compatible chat/completions endpoint.
+    # Ollama default: http://localhost:11434/v1
+    # LM Studio default: http://localhost:1234/v1
+    LOCAL_LLM_URL: str = os.getenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
+
+    # Model identifier as understood by the local server
+    LOCAL_LLM_MODEL: str = os.getenv("LOCAL_LLM_MODEL", "llama3.2")
+
+    # Placeholder API key — most local servers accept any non-empty string
+    LOCAL_LLM_API_KEY: str = os.getenv("LOCAL_LLM_API_KEY", "local")
+
+    # Request timeout in seconds for the local LLM (can be slower than cloud)
+    LOCAL_LLM_TIMEOUT: float = _float("LOCAL_LLM_TIMEOUT", 30.0)
+
+    # ------------------------------------------------------------------ #
     # Alert behaviour
     # ------------------------------------------------------------------ #
     # Maximum number of alert history entries kept in memory

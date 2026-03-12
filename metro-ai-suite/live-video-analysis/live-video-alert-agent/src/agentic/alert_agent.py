@@ -36,7 +36,9 @@ Usage (called from AgentManager)
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from src.config import settings
@@ -59,6 +61,76 @@ _TOOL_MAP = {
     "publish_mqtt": publish_mqtt,
 }
 
+# OpenAI-compatible tool schemas for the local-LLM dispatch mode.
+# Parameters are intentionally empty: the LLM selects *which* tools to invoke;
+# kwargs are populated automatically by _build_tool_kwargs().
+_TOOL_SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "log_alert",
+            "description": "Log the alert event to application logs and history. Always invoke.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_email",
+            "description": "Send an email notification about the alert to configured recipients.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "trigger_webhook",
+            "description": "Send an HTTP POST webhook notification about the alert.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "capture_snapshot",
+            "description": "Save a snapshot image of the current camera frame to disk.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "publish_mqtt",
+            "description": "Publish the alert event to an MQTT broker.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
+
+
+def _parse_tool_names_from_text(text: str) -> List[str]:
+    """Extract valid tool names from free-form LLM text output."""
+    valid = list(_TOOL_MAP.keys())
+    valid_set = set(valid)
+    # Try to find a JSON array anywhere in the response
+    match = re.search(r'\[.*?\]', text, re.DOTALL)
+    if match:
+        try:
+            candidates = json.loads(match.group())
+            if isinstance(candidates, list):
+                # Preserve model-returned order while deduplicating.
+                found = []
+                for t in candidates:
+                    if isinstance(t, str) and t in valid_set and t not in found:
+                        found.append(t)
+                if found:
+                    return found
+        except (json.JSONDecodeError, ValueError):
+            pass
+    # Fallback: look for any known tool name mentioned in the text
+    lowered = text.lower()
+    return [name for name in valid if name.lower() in lowered]
+
 
 class AlertActionAgent:
     """
@@ -70,12 +142,24 @@ class AlertActionAgent:
         Override the USE_ADK setting.  If None, uses settings.USE_ADK.
     """
 
-    def __init__(self, use_adk: Optional[bool] = None):
+    def __init__(
+        self,
+        use_adk: Optional[bool] = None,
+        use_local_llm: Optional[bool] = None,
+    ):
         self._use_adk = use_adk if use_adk is not None else settings.USE_ADK
+        # USE_ADK takes precedence; local LLM only activates when ADK is off
+        self._use_local_llm = (
+            (use_local_llm if use_local_llm is not None else settings.USE_LOCAL_LLM)
+            and not self._use_adk
+        )
         self._adk_runner = None
+        self._local_llm_client = None
 
         if self._use_adk:
             self._init_adk()
+        elif self._use_local_llm:
+            self._init_local_llm()
         else:
             logger.info("AlertActionAgent initialised in rule-based mode")
 
@@ -151,6 +235,39 @@ class AlertActionAgent:
             logger.error(f"ADK init error: {exc} — falling back to rule-based mode")
             self._use_adk = False
 
+    def _init_local_llm(self):
+        """
+        Initialise an AsyncOpenAI client pointing at a locally hosted
+        OpenAI-compatible endpoint (Ollama, LM Studio, vLLM, OVMS text, …).
+
+        The ``openai`` package is already a project dependency (used by
+        VlmClient), so no additional install is required.
+        """
+        try:
+            from openai import AsyncOpenAI  # already in requirements.txt
+
+            if not settings.LOCAL_LLM_URL:
+                logger.warning(
+                    "USE_LOCAL_LLM=true but LOCAL_LLM_URL is not set — "
+                    "falling back to rule-based mode"
+                )
+                self._use_local_llm = False
+                return
+
+            self._local_llm_client = AsyncOpenAI(
+                base_url=settings.LOCAL_LLM_URL,
+                api_key=settings.LOCAL_LLM_API_KEY or "local",
+            )
+            logger.info(
+                f"AlertActionAgent initialised with local LLM "
+                f"(url={settings.LOCAL_LLM_URL} model={settings.LOCAL_LLM_MODEL})"
+            )
+        except Exception as exc:
+            logger.error(
+                f"Local LLM init error: {exc} — falling back to rule-based mode"
+            )
+            self._use_local_llm = False
+
     # ------------------------------------------------------------------ #
     # Public dispatch
     # ------------------------------------------------------------------ #
@@ -175,6 +292,11 @@ class AlertActionAgent:
 
         if self._use_adk and self._adk_runner:
             return await self._dispatch_adk(
+                stream_id, alert_cfg, answer, reason,
+                consecutive_count, escalated, snapshot_path,
+            )
+        elif self._use_local_llm and self._local_llm_client:
+            return await self._dispatch_local_llm(
                 stream_id, alert_cfg, answer, reason,
                 consecutive_count, escalated, snapshot_path,
             )
@@ -203,16 +325,35 @@ class AlertActionAgent:
         tools if applicable) without an LLM reasoning step.
         """
         tool_names: List[str] = list(alert_cfg.tools)
-
-        # Always ensure log_alert is present
         if "log_alert" not in tool_names:
             tool_names.insert(0, "log_alert")
-
-        # Add escalation tools if escalated
         if escalated and alert_cfg.escalation:
             for t in alert_cfg.escalation.additional_tools:
                 if t not in tool_names:
                     tool_names.append(t)
+        return await self._execute_tool_list(
+            tool_names, stream_id, alert_cfg, answer, reason,
+            consecutive_count, escalated, snapshot_path,
+        )
+
+    async def _execute_tool_list(
+        self,
+        tool_names: List[str],
+        stream_id: str,
+        alert_cfg: AlertConfig,
+        answer: str,
+        reason: str,
+        consecutive_count: int,
+        escalated: bool,
+        snapshot_path: Optional[str],
+    ) -> List[str]:
+        """
+        Execute a specific list of tools, building all kwargs automatically.
+        Shared by rule-based and local-LLM dispatch modes.
+        """
+        names = list(tool_names)
+        if "log_alert" not in names:
+            names.insert(0, "log_alert")
 
         invoked: List[str] = []
         common_ctx = {
@@ -222,21 +363,21 @@ class AlertActionAgent:
             "answer": answer,
             "reason": reason,
         }
-
-        for tool_name in tool_names:
+        for tool_name in names:
             fn = _TOOL_MAP.get(tool_name)
             if fn is None:
-                logger.warning(f"Unknown tool '{tool_name}' in alert '{alert_cfg.name}'")
+                logger.warning(f"Unknown tool '{tool_name}' — skipped")
                 continue
             try:
-                kwargs = _build_tool_kwargs(tool_name, common_ctx, consecutive_count, escalated, snapshot_path)
+                kwargs = _build_tool_kwargs(
+                    tool_name, common_ctx, consecutive_count, escalated, snapshot_path,
+                )
                 result = await fn(**kwargs)
-                if result.get("status") not in ("error",):
+                if result.get("status") != "error":
                     invoked.append(tool_name)
                 logger.debug(f"Tool '{tool_name}' result: {result}")
             except Exception as exc:
-                logger.error(f"Tool '{tool_name}' raised exception: {exc}")
-
+                logger.error(f"Tool '{tool_name}' raised: {exc}")
         return invoked
 
     # ------------------------------------------------------------------ #
@@ -301,6 +442,155 @@ class AlertActionAgent:
 
         except Exception as exc:
             logger.error(f"ADK dispatch failed: {exc} — falling back to rule-based")
+            return await self._dispatch_rule_based(
+                stream_id, alert_cfg, answer, reason,
+                consecutive_count, escalated, snapshot_path,
+            )
+
+    # ------------------------------------------------------------------ #
+    # Local LLM executor
+    # ------------------------------------------------------------------ #
+
+    async def _dispatch_local_llm(
+        self,
+        stream_id: str,
+        alert_cfg: AlertConfig,
+        answer: str,
+        reason: str,
+        consecutive_count: int,
+        escalated: bool,
+        snapshot_path: Optional[str],
+    ) -> List[str]:
+        """
+        Use a locally hosted OpenAI-compatible text LLM to decide which tools
+        to invoke.
+
+        Strategy
+        --------
+        1. **Tool-calling** — send the alert context with ``tools=`` populated
+           from ``_TOOL_SCHEMAS``.  Models that support function-calling
+           (Ollama llama3.1+, Mistral, Phi-3, vLLM, OVMS text) will return
+           ``tool_calls`` directly.
+        2. **JSON fallback** — if tool-calling is unsupported or returns no
+           calls, re-send the prompt asking for a plain JSON array of tool
+           names.  ``_parse_tool_names_from_text()`` handles imperfect output.
+        3. **Rule-based fallback** — used when the LLM returns nothing useful
+           or any exception is raised.
+        """
+        try:
+            # Build the list of tools the LLM may select from
+            available: List[str] = list(alert_cfg.tools)
+            if "log_alert" not in available:
+                available.insert(0, "log_alert")
+            if escalated and alert_cfg.escalation:
+                for t in alert_cfg.escalation.additional_tools:
+                    if t not in available:
+                        available.append(t)
+
+            system_msg = (
+                "You are a security alert action agent in a video surveillance system.\n"
+                "Decide which tools to invoke based on the alert details provided.\n"
+                "Guidelines:\n"
+                "- CRITICAL severity: invoke capture_snapshot, log_alert, send_email.\n"
+                "- HIGH severity: invoke capture_snapshot and log_alert; "
+                "  send_email if new or escalating.\n"
+                "- MEDIUM severity: invoke log_alert; optionally trigger_webhook.\n"
+                "- LOW severity: invoke log_alert only.\n"
+                "- If escalated=true: also invoke trigger_webhook and publish_mqtt.\n"
+                "- Select ONLY tools listed in configured_tools.\n"
+                "- ALWAYS include log_alert.\n"
+            )
+            user_content = (
+                f"stream_id: {stream_id}\n"
+                f"alert_name: {alert_cfg.name}\n"
+                f"severity: {alert_cfg.severity.value}\n"
+                f"answer: {answer}\n"
+                f"reason: {reason}\n"
+                f"consecutive_count: {consecutive_count}\n"
+                f"escalated: {escalated}\n"
+                f"snapshot_path: {snapshot_path or 'none'}\n"
+                f"configured_tools: {available}\n"
+            )
+            messages = [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_content},
+            ]
+            # Only expose schemas for tools the alert is configured to use
+            filtered_schemas = [
+                s for s in _TOOL_SCHEMAS
+                if s["function"]["name"] in available
+            ]
+
+            selected_tools: List[str] = []
+
+            # --- Attempt 1: tool-calling (function-calling) API ---
+            try:
+                resp = await self._local_llm_client.chat.completions.create(
+                    model=settings.LOCAL_LLM_MODEL,
+                    messages=messages,
+                    tools=filtered_schemas,
+                    tool_choice="auto",
+                    timeout=settings.LOCAL_LLM_TIMEOUT,
+                )
+                msg = resp.choices[0].message
+                if msg.tool_calls:
+                    selected_tools = [
+                        tc.function.name for tc in msg.tool_calls
+                        if tc.function.name in _TOOL_MAP
+                    ]
+                    logger.info(
+                        f"[{stream_id}][{alert_cfg.name}] Local LLM "
+                        f"tool-calls: {selected_tools}"
+                    )
+            except Exception as tc_exc:
+                logger.debug(
+                    f"Tool-calling API unavailable ({tc_exc}); "
+                    "trying JSON text fallback"
+                )
+
+            # --- Attempt 2: JSON text fallback ---
+            if not selected_tools:
+                json_prompt = (
+                    user_content
+                    + f"\nReturn ONLY a JSON array of tool names to invoke "
+                    f"from this list: {available}\n"
+                    f'Example: ["log_alert", "send_email"]'
+                )
+                resp = await self._local_llm_client.chat.completions.create(
+                    model=settings.LOCAL_LLM_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": json_prompt},
+                    ],
+                    timeout=settings.LOCAL_LLM_TIMEOUT,
+                )
+                raw = (resp.choices[0].message.content or "").strip()
+                selected_tools = _parse_tool_names_from_text(raw)
+                logger.info(
+                    f"[{stream_id}][{alert_cfg.name}] Local LLM JSON-parsed "
+                    f"tools: {selected_tools} (raw: {raw[:120]})"
+                )
+
+            if not selected_tools:
+                logger.warning(
+                    f"Local LLM returned no valid tool names for "
+                    f"[{stream_id}][{alert_cfg.name}] — falling back to rule-based"
+                )
+                return await self._dispatch_rule_based(
+                    stream_id, alert_cfg, answer, reason,
+                    consecutive_count, escalated, snapshot_path,
+                )
+
+            return await self._execute_tool_list(
+                selected_tools, stream_id, alert_cfg, answer, reason,
+                consecutive_count, escalated, snapshot_path,
+            )
+
+        except Exception as exc:
+            logger.error(
+                f"Local LLM dispatch failed for [{stream_id}][{alert_cfg.name}]: "
+                f"{exc} — falling back to rule-based"
+            )
             return await self._dispatch_rule_based(
                 stream_id, alert_cfg, answer, reason,
                 consecutive_count, escalated, snapshot_path,

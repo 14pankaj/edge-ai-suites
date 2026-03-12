@@ -32,24 +32,68 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
 
 4. **Configure Environment**:
 
-   **Optional environment variables:**
+   **Core variables** (all optional — streams can also be added via UI after startup):
    ```bash
-   # Optional: Pre-configure a video stream (can also add streams via UI)
+   # Pre-configure a video stream
    export RTSP_URL=rtsp://<camera-ip>:<port>/stream
 
-   # Use a different VLM model (default: Phi-3.5-vision-instruct-int4-ov)
-   # Example: Use InternVL2-2B model instead
+   # VLM model selection (default: Phi-3.5-vision-instruct-int4-ov)
    export OVMS_SOURCE_MODEL=OpenVINO/InternVL2-2B-int4-ov
    export MODEL_NAME=InternVL2-2B
 
-   # Change application port (default: 9000)
+   # Application port (default: 9000)
    export PORT=9001
 
-   # Enable debug logging
+   # Log verbosity
    export LOG_LEVEL=DEBUG
    ```
 
-> **Note:** All environment variables are optional. Streams can be added dynamically through the web UI after startup.
+   **API authentication** (leave empty to disable):
+   ```bash
+   export API_KEY=my-secret-key
+   ```
+
+   **Agentic dispatch — choose one mode:**
+
+   *Option A — Google ADK (requires internet + Gemini API key):*
+   ```bash
+   export USE_ADK=true
+   export GEMINI_API_KEY=<your-gemini-api-key>
+   export ADK_MODEL=gemini-2.0-flash-lite   # default
+   ```
+
+   *Option B — Local LLM (fully offline, e.g. Ollama):*
+   ```bash
+   # Start Ollama: ollama run llama3.2
+   export USE_LOCAL_LLM=true
+   export LOCAL_LLM_URL=http://localhost:11434/v1
+   export LOCAL_LLM_MODEL=llama3.2
+   ```
+
+   *Option C — Rule-based (default, no LLM needed):*
+   ```bash
+   # No extra variables required
+   ```
+
+   **Action tools** (configure the ones you want active):
+   ```bash
+   # Email notifications
+   export SMTP_HOST=smtp.example.com
+   export SMTP_PORT=587
+   export SMTP_USER=alerts@example.com
+   export SMTP_PASSWORD=<password>
+   export SMTP_FROM=alerts@example.com
+   export SMTP_ALERT_RECIPIENT=oncall@example.com
+
+   # Webhook (receives HMAC-signed POST)
+   export WEBHOOK_URL=https://hooks.example.com/alert
+   export WEBHOOK_SECRET=<hmac-secret>          # optional
+
+   # MQTT
+   export MQTT_BROKER=192.168.1.20
+   export MQTT_PORT=1883
+   export MQTT_BASE_TOPIC=alerts/live-video
+   ```
 
 5. **Start the Application**:
    Run the following command from the project root:
@@ -91,15 +135,57 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
 
 ### Configuring Alerts
 1. Under **AI Agent Alerts** section:
-   - Click **Create New Alert** (up to 4 alerts supported)
-   - Enter an **Alert Name** (e.g., "Person Detection")
-   - Write a **Prompt** describing the condition (e.g., "Is there a person?")
+   - Click **Create New Alert**
+   - Enter an **Alert Name** (e.g., "Fire Detection")
+   - Write a **Prompt** describing the condition (e.g., "Is there fire or smoke?")
+   - Set **Severity**, **Cooldown**, and the **Tools** to invoke on detection
 2. Click **Save** to activate
+
+   Alternatively, configure alerts via the REST API:
+   ```bash
+   curl -X POST http://localhost:9000/config/alerts \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: ${API_KEY}" \
+     -d '[
+       {
+         "name": "Fire Detection",
+         "prompt": "Is there fire or smoke visible?",
+         "enabled": true,
+         "severity": "critical",
+         "cooldown_seconds": 60,
+         "tools": ["log_alert", "capture_snapshot", "send_email"],
+         "escalation": {
+           "threshold_consecutive": 3,
+           "additional_tools": ["trigger_webhook", "publish_mqtt"]
+         }
+       }
+     ]'
+   ```
 
 ### Viewing Results
 - The dashboard shows the live stream with analysis results below
 - Use the dropdown to filter alerts: "All Alerts" or individual alert types
 - Results update automatically via Server-Sent Events (SSE)
+- The `alert_action` event surface shows which tools were invoked and whether escalation occurred
+
+### Checking Health and Metrics
+
+```bash
+# Liveness
+curl http://localhost:9000/health
+
+# Readiness (non-200 = not ready)
+curl http://localhost:9000/ready
+
+# System + per-stream metrics
+curl http://localhost:9000/metrics
+
+# Query last 20 critical alert events
+curl "http://localhost:9000/alerts/history?severity=critical&limit=20"
+
+# List configured action tools
+curl http://localhost:9000/tools
+```
 
 ## Managing the Application
 
