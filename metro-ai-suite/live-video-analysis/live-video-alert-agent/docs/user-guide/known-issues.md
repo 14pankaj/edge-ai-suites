@@ -4,6 +4,52 @@
 
 - This release includes only limited testing on EMT‑S and EMT‑D. Some behaviors may not yet be fully validated across all scenarios.
 
+## ADK mode requires internet access
+
+Setting `USE_ADK=true` establishes a connection to Google’s Gemini API on every
+alert dispatch. In air-gapped or restricted-network environments:
+
+- Use `USE_LOCAL_LLM=true` with a locally hosted model instead.
+- Or omit both flags to fall back to rule-based mode (no external LLM needed).
+
+## Local LLM tool-calling support varies by model
+
+Not all models served via Ollama or LM Studio implement the OpenAI function-calling
+API. The agent automatically falls back to JSON text parsing in that case, but very
+small models (< 3B parameters) may produce unpredictable output.
+
+Recommended models for reliable tool-calling: `llama3.1`, `llama3.2`, `mistral`,
+`phi3`, `qwen2.5`.
+
+If neither strategy returns valid tool names, rule-based dispatch is used as a
+final fallback — alerts continue to function.
+
+## Email tool silently skipped when SMTP not configured
+
+If `send_email` is listed in an alert’s `tools` array but `SMTP_HOST` is not set,
+the tool logs a warning and returns without error. Verify SMTP settings with:
+```bash
+curl -X POST http://localhost:9000/tools/send_email/invoke \
+  -H "X-API-Key: ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"parameters": {"subject": "test", "body": "test", "stream_id": "cam1", "alert_name": "test", "severity": "low"}}'
+```
+
+## Snapshot directory not writable
+
+If `capture_snapshot` fails with a permission error, the container’s
+`/app/snapshots` directory may not be writable by `appuser`:
+```bash
+docker exec live-video-alert ls -la /app/snapshots
+```
+If using a host-bind mount instead of the `snapshots` named volume, ensure the
+host directory is owned by UID 1000.
+
+## API config endpoint renamed
+
+As of 2.0.0, `/config/agents` is renamed to `/config/alerts`. Clients using the
+old path will receive a 404. Update integrations accordingly.
+
 ## RTSP stream not connecting
 
 Symptoms:

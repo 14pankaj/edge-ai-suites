@@ -52,7 +52,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 300s
-    network_mode: host
 
   live-video-alert:
     image: ${REGISTRY:-}live-video-alert:${TAG:-latest}
@@ -76,7 +75,7 @@ services:
       - RTSP_URL=${RTSP_URL}
 
       # ---- VLM / OVMS ----
-      - VLM_URL=${VLM_URL:-http://localhost:8000/v3}
+      - VLM_URL=${VLM_URL:-http://ovms:8000/v3}
       - VLM_API_KEY=${VLM_API_KEY:-}
       - MODEL_NAME=${MODEL_NAME:-Phi-3.5-Vision}
       - VLM_IMAGE_MAX_DIM=${VLM_IMAGE_MAX_DIM:-448}
@@ -93,10 +92,17 @@ services:
       # ---- API auth (leave empty to disable) ----
       - API_KEY=${API_KEY:-}
 
-      # ---- Google ADK (optional; falls back to rule-based if unset) ----
+      # ---- Google ADK (optional; USE_ADK takes precedence over USE_LOCAL_LLM) ----
       - USE_ADK=${USE_ADK:-false}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - ADK_MODEL=${ADK_MODEL:-gemini-2.0-flash-lite}
+
+      # ---- Local LLM (optional; OpenAI-compatible endpoint, e.g. Ollama / LM Studio) ----
+      - USE_LOCAL_LLM=${USE_LOCAL_LLM:-false}
+      - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://host.docker.internal:11434/v1}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-llama3.2}
+      - LOCAL_LLM_API_KEY=${LOCAL_LLM_API_KEY:-local}
+      - LOCAL_LLM_TIMEOUT=${LOCAL_LLM_TIMEOUT:-30}
 
       # ---- alert history ----
       - ALERT_HISTORY_SIZE=${ALERT_HISTORY_SIZE:-500}
@@ -109,8 +115,8 @@ services:
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
-      - SMTP_FROM=${SMTP_FROM:-}
-      - SMTP_ALERT_RECIPIENT=${SMTP_ALERT_RECIPIENT:-}
+      - ALERT_EMAIL_FROM=${ALERT_EMAIL_FROM:-}
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO:-}
 
       # ---- webhook action tool (optional) ----
       - WEBHOOK_URL=${WEBHOOK_URL:-}
@@ -128,6 +134,10 @@ services:
       # Persist alert snapshots across container restarts
       - snapshots:/app/snapshots
 
+    # Allow container-to-host access for local LLM endpoints on Linux hosts.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:${PORT:-9000}/health"]
       interval: 30s
@@ -138,7 +148,6 @@ services:
     depends_on:
       ovms:
         condition: service_healthy
-    network_mode: host
 
 volumes:
   ovms-models:
