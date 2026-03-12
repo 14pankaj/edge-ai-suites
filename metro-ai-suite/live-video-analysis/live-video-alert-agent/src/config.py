@@ -93,16 +93,15 @@ class Settings:
     # ------------------------------------------------------------------ #
     # Set USE_LOCAL_LLM=true to use a locally hosted text LLM instead of
     # Google ADK.  USE_ADK takes precedence when both are true.
-    # Compatible backends: Ollama, LM Studio, vLLM, OVMS text model, etc.
+    # Default deployment targets OVMS text model endpoint.
     USE_LOCAL_LLM: bool = _bool("USE_LOCAL_LLM", False)
 
     # Base URL of the OpenAI-compatible chat/completions endpoint.
-    # Ollama default: http://localhost:11434/v1
-    # LM Studio default: http://localhost:1234/v1
-    LOCAL_LLM_URL: str = os.getenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
+    # Default points to OVMS in docker-compose (single multi-model server).
+    LOCAL_LLM_URL: str = os.getenv("LOCAL_LLM_URL", "http://ovms:8000/v3")
 
     # Model identifier as understood by the local server
-    LOCAL_LLM_MODEL: str = os.getenv("LOCAL_LLM_MODEL", "llama3.2")
+    LOCAL_LLM_MODEL: str = os.getenv("LOCAL_LLM_MODEL", "Phi-4-mini-instruct")
 
     # Placeholder API key — most local servers accept any non-empty string
     LOCAL_LLM_API_KEY: str = os.getenv("LOCAL_LLM_API_KEY", "local")

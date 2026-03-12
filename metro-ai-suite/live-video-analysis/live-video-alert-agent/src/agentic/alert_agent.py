@@ -241,7 +241,7 @@ class AlertActionAgent:
     def _init_local_llm(self):
         """
         Initialise an AsyncOpenAI client pointing at a locally hosted
-        OpenAI-compatible endpoint (Ollama, LM Studio, vLLM, OVMS text, …).
+        OpenAI-compatible endpoint (OVMS text model service).
 
         The ``openai`` package is already a project dependency (used by
         VlmClient), so no additional install is required.
@@ -472,7 +472,7 @@ class AlertActionAgent:
         --------
         1. **Tool-calling** — send the alert context with ``tools=`` populated
            from ``_TOOL_SCHEMAS``.  Models that support function-calling
-           (Ollama llama3.1+, Mistral, Phi-3, vLLM, OVMS text) will return
+              (for example Phi-4, Phi-3, Mistral served by OVMS) will return
            ``tool_calls`` directly.
         2. **JSON fallback** — if tool-calling is unsupported or returns no
            calls, re-send the prompt asking for a plain JSON array of tool

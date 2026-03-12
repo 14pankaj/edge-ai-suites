@@ -25,8 +25,7 @@ AgentManager                   one asyncio.Task per stream (concurrent)
   │
   ├─ AlertActionAgent          decides WHICH tools to call
   │   ├─ ADK mode              Google ADK LlmAgent + FunctionTool
-  │   ├─ Local LLM mode        OpenAI-compatible local endpoint
-  │   │                        (Ollama / LM Studio / vLLM / OVMS text)
+  │   ├─ Local LLM mode        OVMS-hosted text model endpoint
   │   └─ Rule-based mode       direct tool execution — no LLM needed
   │
   └─ Action Tools (async)
@@ -114,8 +113,7 @@ Requires: `GEMINI_API_KEY` environment variable.
 
 #### Mode 2 — Local LLM (`USE_LOCAL_LLM=true`)
 
-Connects to any OpenAI-compatible local endpoint (Ollama, LM Studio, vLLM, or
-a text model served via OVMS). Two-tier execution:
+Connects to an OVMS-hosted OpenAI-compatible text endpoint. Two-tier execution:
 
 1. **Tool-calling API** — sends `tools=` schemas; models that support
    function-calling (llama3.1+, Mistral, Phi-3, etc.) return `tool_calls` directly.

@@ -7,8 +7,8 @@
 - **Google ADK integration**: Set `USE_ADK=true` + `GEMINI_API_KEY` to enable
   LLM-driven tool-call reasoning via `LlmAgent` + `FunctionTool`.
 - **Local LLM support**: Set `USE_LOCAL_LLM=true` + `LOCAL_LLM_URL` +
-  `LOCAL_LLM_MODEL` to use any OpenAI-compatible local server (Ollama, LM Studio,
-  vLLM, OVMS text model). Supports tool-calling API with JSON-text fallback.
+  `LOCAL_LLM_MODEL` to use an OVMS-hosted text model endpoint.
+  Supports tool-calling API with JSON-text fallback.
 - **Rule-based mode** (default): Fully offline, no LLM required.
 - Three-tier dispatch priority: ADK > Local LLM > Rule-based.
 
