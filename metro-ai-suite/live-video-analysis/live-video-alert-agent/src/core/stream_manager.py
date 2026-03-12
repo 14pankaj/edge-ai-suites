@@ -1,3 +1,6 @@
+# Copyright (C) 2025 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 """
 LiveStreamManager — per-camera RTSP/file ingestion with frame-rate throttling.
 
