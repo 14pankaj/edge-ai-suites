@@ -95,6 +95,10 @@ class VLMClient:
             {"role": "user", "content": user_content},
         ]
 
+        logger.info(
+            f"VLM call → model={self.model_name!r} "
+            f"url={self._client.base_url} frames={len(frames)}"
+        )
         return await self._call_with_retry(messages)
 
     # ------------------------------------------------------------------ #
@@ -137,8 +141,10 @@ class VLMClient:
                     temperature=0.1,
                 )
                 self.last_inference_ms = (time.monotonic() - t0) * 1000
-                logger.debug(f"VLM inference {self.last_inference_ms:.0f} ms")
-                return response.choices[0].message.content
+                logger.info(f"VLM inference complete — {self.last_inference_ms:.0f} ms (attempt {attempt + 1})")
+                content = response.choices[0].message.content
+                logger.debug(f"VLM raw response (truncated): {(content or '')[:300]!r}")
+                return content
 
             except (APITimeoutError, APIConnectionError) as exc:
                 if attempt < retries:

@@ -329,6 +329,10 @@ class AgentManager:
 
         prompt = self._build_vlm_prompt(enabled)
 
+        logger.debug(
+            f"[{stream_id}] Inference cycle — frames={len(frames)} "
+            f"alerts={[a.name for a in enabled]}"
+        )
         response = await self.vlm_client.analyze_stream_segment(
             frames,
             system_prompt=(
@@ -346,6 +350,7 @@ class AgentManager:
         if not response:
             return
 
+        logger.debug(f"[{stream_id}] VLM response: {response[:300]!r}")
         parsed = self._parse_vlm_response(response, enabled)
         if not parsed:
             return
@@ -404,25 +409,36 @@ class AgentManager:
             if not should_act:
                 continue
 
-            # Optionally capture snapshot first (so path is available to email)
+            # Capture snapshot first (so path is available to other tools like email).
+            # Done here — NOT re-run inside dispatch — to avoid double-writing.
             snapshot_path: Optional[str] = None
-            if "capture_snapshot" in alert_cfg.tools or (
+            wants_snapshot = "capture_snapshot" in alert_cfg.tools or (
                 is_escalation
                 and alert_cfg.escalation
                 and "capture_snapshot" in alert_cfg.escalation.additional_tools
-            ):
-                from src.agentic.tools.snapshot_tool import capture_snapshot
-                snap_result = await capture_snapshot(
-                    stream_id=stream_id,
-                    alert_name=alert_cfg.name,
-                    severity=alert_cfg.severity.value,
-                )
-                snapshot_path = snap_result.get("path")
+            )
+            if wants_snapshot:
+                try:
+                    from src.agentic.tools.snapshot_tool import capture_snapshot
+                    snap_result = await capture_snapshot(
+                        stream_id=stream_id,
+                        alert_name=alert_cfg.name,
+                        severity=alert_cfg.severity.value,
+                    )
+                    snapshot_path = snap_result.get("path")
+                except Exception as snap_exc:
+                    logger.error(f"Snapshot capture failed for '{stream_id}': {snap_exc}")
+
+            # Build a tool list that excludes capture_snapshot — it was already
+            # invoked above, so passing it to dispatch would run it a second time.
+            import copy
+            dispatch_cfg = copy.copy(alert_cfg)
+            dispatch_cfg.tools = [t for t in alert_cfg.tools if t != "capture_snapshot"]
 
             # Dispatch via action agent
             actions_taken = await self.action_agent.dispatch(
                 stream_id=stream_id,
-                alert_cfg=alert_cfg,
+                alert_cfg=dispatch_cfg,
                 answer=answer,
                 reason=reason,
                 consecutive_count=self.alert_state.get_consecutive_count(
@@ -431,6 +447,10 @@ class AgentManager:
                 escalated=is_escalation,
                 snapshot_path=snapshot_path,
             )
+
+            # Re-add capture_snapshot to actions_taken if it succeeded
+            if snapshot_path and "capture_snapshot" not in actions_taken:
+                actions_taken = ["capture_snapshot"] + actions_taken
 
             # Record to history
             self.alert_state.record_event(

@@ -67,7 +67,7 @@ class AlertConfig(BaseModel):
     # are suppressed to prevent notification floods.
     cooldown_seconds: float = Field(default=60.0, ge=0)
     # Tool names to invoke when this alert fires (answer == YES and cooldown passed).
-    tools: List[str] = Field(default_factory=lambda: ["log_alert"])
+    tools: List[str] = Field(default_factory=lambda: ["log_alert", "capture_snapshot"])
     escalation: Optional[EscalationConfig] = None
 
     @field_validator("name")

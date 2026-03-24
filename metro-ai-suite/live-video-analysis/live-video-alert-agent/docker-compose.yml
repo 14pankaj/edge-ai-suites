@@ -48,7 +48,7 @@ services:
         chmod 644 /models/config_all.json
 
   ovms:
-    image: openvino/model_server:2025.4.1
+    image: openvino/model_server:2026.0
     container_name: ovms-vlm
     user: "5000:5000" 
     restart: unless-stopped
@@ -75,8 +75,16 @@ services:
     command:
       - --rest_port
       - "8000"
-      - --config_path
-      - "/models/config_all.json"
+      - --source_model
+      - "${OVMS_SOURCE_MODEL:-OpenVINO/Phi-3.5-vision-instruct-int4-ov}"
+      - --model_repository_path
+      - "/models"
+      - --model_name
+      - "${MODEL_NAME:-Phi-3.5-Vision}"
+      - --task
+      - "text_generation"
+      - --pipeline_type
+      - "VLM"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/config"]
       interval: 10s
@@ -124,12 +132,13 @@ services:
       - API_KEY=${API_KEY:-}
 
       # ---- Google ADK (optional; USE_ADK takes precedence over USE_LOCAL_LLM) ----
-      - USE_ADK=${USE_ADK:-false}
+      - USE_ADK=${USE_ADK:-true}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - ADK_MODEL=${ADK_MODEL:-gemini-2.0-flash-lite}
+      - ADK_USE_LOCAL_LLM=${ADK_USE_LOCAL_LLM:-true}
 
       # ---- Local LLM (optional; defaults to OVMS text model endpoint) ----
-      - USE_LOCAL_LLM=${USE_LOCAL_LLM:-false}
+      - USE_LOCAL_LLM=${USE_LOCAL_LLM:-true}
       - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://ovms:8000/v3}
       - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-Phi-4-mini-instruct}
       - LOCAL_LLM_API_KEY=${LOCAL_LLM_API_KEY:-local}
