@@ -75,10 +75,13 @@ async def capture_snapshot(
     path = os.path.join(out_dir, filename)
 
     # Write to disk (blocking I/O in thread pool)
-    def _write():
-        cv2.imwrite(path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+    def _write() -> bool:
+        return cv2.imwrite(path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
 
-    await asyncio.to_thread(_write)
+    success = await asyncio.to_thread(_write)
+    if not success:
+        logger.error(f"cv2.imwrite failed — check path permissions or codec: {path}")
+        return {"status": "error", "reason": f"cv2.imwrite returned False for path: {path}"}
 
     logger.info(f"Snapshot saved: {path}")
     return {"status": "saved", "path": path}

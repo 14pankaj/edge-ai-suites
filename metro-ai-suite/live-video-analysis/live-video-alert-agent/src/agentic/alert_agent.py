@@ -173,21 +173,43 @@ class AlertActionAgent:
     def _init_adk(self):
         """Initialise the Google ADK runner lazily."""
         try:
-            import google.generativeai as genai
+            import google as genai
             from google.adk.agents import LlmAgent
             from google.adk.runners import Runner
             from google.adk.sessions import InMemorySessionService
             from google.adk.tools import FunctionTool
 
-            if not settings.GEMINI_API_KEY:
-                logger.warning(
-                    "USE_ADK=true but GEMINI_API_KEY is not set — "
-                    "falling back to rule-based mode"
+            # ---- model selection: local OVMS or Gemini cloud ----
+            if settings.ADK_USE_LOCAL_LLM:
+                if not settings.LOCAL_LLM_URL:
+                    logger.warning(
+                        "ADK_USE_LOCAL_LLM=true but LOCAL_LLM_URL is not set — "
+                        "falling back to rule-based mode"
+                    )
+                    self._use_adk = False
+                    return
+                import os as _os
+                from google.adk.models.lite_llm import LiteLlm
+                # LiteLlm delegates to LiteLLM's OpenAI-compatible provider.
+                # OPENAI_API_BASE / OPENAI_API_KEY are the env vars it reads.
+                _os.environ.setdefault("OPENAI_API_BASE", settings.LOCAL_LLM_URL)
+                _os.environ.setdefault("OPENAI_API_KEY", settings.LOCAL_LLM_API_KEY or "local")
+                adk_model = LiteLlm(model=f"openai/{settings.LOCAL_LLM_MODEL}")
+                logger.info(
+                    f"ADK using local OVMS model "
+                    f"(url={settings.LOCAL_LLM_URL} model={settings.LOCAL_LLM_MODEL})"
                 )
-                self._use_adk = False
-                return
-
-            genai.configure(api_key=settings.GEMINI_API_KEY)
+            else:
+                import google as genai
+                if not settings.GEMINI_API_KEY:
+                    logger.warning(
+                        "USE_ADK=true but GEMINI_API_KEY is not set — "
+                        "falling back to rule-based mode"
+                    )
+                    self._use_adk = False
+                    return
+                genai.configure(api_key=settings.GEMINI_API_KEY)
+                adk_model = settings.ADK_MODEL
 
             instruction = (
                 "You are an intelligent security alert action agent embedded in a "
@@ -212,21 +234,24 @@ class AlertActionAgent:
 
             agent = LlmAgent(
                 name="alert_action_agent",
-                model=settings.ADK_MODEL,
+                model=adk_model,
                 description="Processes video alert detections and dispatches actions",
                 instruction=instruction,
                 tools=adk_tools,
             )
 
-            session_service = InMemorySessionService()
+            session_service = asyncio.run(InMemorySessionService().create_session())
             self._adk_runner = Runner(
                 agent=agent,
                 app_name="live-video-alert",
                 session_service=session_service,
             )
-            logger.info(
-                f"AlertActionAgent initialised with ADK (model={settings.ADK_MODEL})"
+            _model_label = (
+                f"local:{settings.LOCAL_LLM_MODEL}"
+                if settings.ADK_USE_LOCAL_LLM
+                else settings.ADK_MODEL
             )
+            logger.info(f"AlertActionAgent initialised with ADK (model={_model_label})")
 
         except ImportError as exc:
             logger.warning(
@@ -294,16 +319,28 @@ class AlertActionAgent:
             return []
 
         if self._use_adk and self._adk_runner:
+            logger.info(
+                f"[DISPATCH] mode=adk stream={stream_id} alert={alert_cfg.name} "
+                f"severity={alert_cfg.severity.value} escalated={escalated}"
+            )
             return await self._dispatch_adk(
                 stream_id, alert_cfg, answer, reason,
                 consecutive_count, escalated, snapshot_path,
             )
         elif self._use_local_llm and self._local_llm_client:
+            logger.info(
+                f"[DISPATCH] mode=local_llm stream={stream_id} alert={alert_cfg.name} "
+                f"severity={alert_cfg.severity.value} escalated={escalated}"
+            )
             return await self._dispatch_local_llm(
                 stream_id, alert_cfg, answer, reason,
                 consecutive_count, escalated, snapshot_path,
             )
         else:
+            logger.info(
+                f"[DISPATCH] mode=rule_based stream={stream_id} alert={alert_cfg.name} "
+                f"severity={alert_cfg.severity.value} escalated={escalated}"
+            )
             return await self._dispatch_rule_based(
                 stream_id, alert_cfg, answer, reason,
                 consecutive_count, escalated, snapshot_path,
@@ -402,9 +439,13 @@ class AlertActionAgent:
         """
         try:
             from google.adk.sessions import InMemorySessionService
-            import google.generativeai.types as genai_types
 
             session_id = f"{stream_id}_{alert_cfg.name}".replace(" ", "_")
+            logger.info(
+                f"[ADK] Sending to ADK agent — stream={stream_id} "
+                f"alert={alert_cfg.name} model={settings.ADK_MODEL} "
+                f"session={session_id}"
+            )
 
             prompt = (
                 f"Alert detection result:\n"
@@ -424,11 +465,11 @@ class AlertActionAgent:
             invoked_tools: List[str] = []
 
             def _run_adk():
-                from google.adk.types import Content, Part
+                from google.genai import types
                 events = self._adk_runner.run(
                     user_id="system",
                     session_id=session_id,
-                    new_message=Content(parts=[Part(text=prompt)]),
+                    new_message=types.Content(parts=[types.Part(text=prompt)]),
                 )
                 called = []
                 for event in events:

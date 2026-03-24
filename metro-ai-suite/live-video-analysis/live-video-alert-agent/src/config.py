@@ -82,11 +82,16 @@ class Settings:
     # ------------------------------------------------------------------ #
     # Set USE_ADK=true and GEMINI_API_KEY to enable LLM-driven tool calling.
     # When disabled, tools are invoked rule-based (directly from alert config).
-    USE_ADK: bool = _bool("USE_ADK", False)
+    USE_ADK: bool = _bool("USE_ADK", True)
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 
     # Model used by the ADK action agent (reasoning, NOT visual)
     ADK_MODEL: str = os.getenv("ADK_MODEL", "gemini-2.0-flash-lite")
+
+    # When true (default), the ADK agent uses the local OVMS endpoint (via LiteLlm)
+    # instead of the Gemini cloud API.  Reuses LOCAL_LLM_URL / LOCAL_LLM_MODEL.
+    # GEMINI_API_KEY is NOT required.  Set ADK_USE_LOCAL_LLM=false to use Gemini.
+    ADK_USE_LOCAL_LLM: bool = _bool("ADK_USE_LOCAL_LLM", True)
 
     # ------------------------------------------------------------------ #
     # Agentic framework — Local LLM (OpenAI-compatible endpoint)

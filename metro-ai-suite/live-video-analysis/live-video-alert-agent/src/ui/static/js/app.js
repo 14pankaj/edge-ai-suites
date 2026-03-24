@@ -14,6 +14,11 @@ let eventSource = null;
 let pollingInterval = null;
 let sseConnected = false;
 
+let metricsInterval = null;
+let alertHistoryInterval = null;
+let alertHistoryCache = [];
+const ALERT_HISTORY_MAX = 50;
+
 function cssSafeId(str) {
     return str.replace(/[^a-zA-Z0-9-_]/g, '_');
 }
@@ -44,16 +49,22 @@ function showToast(message, type = 'info') {
 document.addEventListener('DOMContentLoaded', async () => {
     await loadAgentConfig();
     await loadStreams();
-    
+
     initSSE();
-    
     initResizer();
-    
+
+    await fetchMetrics();
+    await fetchAlertHistory();
+    metricsInterval = setInterval(fetchMetrics, 5000);
+    alertHistoryInterval = setInterval(fetchAlertHistory, 10000);
+
     window.addEventListener('beforeunload', () => {
         if (eventSource) {
             eventSource.close();
             eventSource = null;
         }
+        clearInterval(metricsInterval);
+        clearInterval(alertHistoryInterval);
     });
 });
 
@@ -109,6 +120,21 @@ function initSSE() {
     
     eventSource.addEventListener('keepalive', () => {
         console.log('[SSE] Keepalive received');
+    });
+
+    eventSource.addEventListener('alert_action', (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            if (data && data.stream_id) {
+                alertHistoryCache.unshift(data);
+                if (alertHistoryCache.length > ALERT_HISTORY_MAX) alertHistoryCache.pop();
+                renderAlertHistory(alertHistoryCache);
+            }
+            // Refresh metrics counters immediately on new alert
+            fetchMetrics();
+        } catch (err) {
+            console.error('[SSE] alert_action parse error:', err);
+        }
     });
     
     eventSource.onerror = (e) => {
@@ -240,7 +266,7 @@ function initResizer() {
 
 async function loadAgentConfig() {
     try {
-        const res = await fetch('/config/agents');
+        const res = await fetch('/config/alerts');
         agentConfig = await res.json();
         renderAgentConfig();
     } catch(e) { 
@@ -303,7 +329,8 @@ function addAgent() {
     agentConfig.push({
         name: `Alert ${num}`,
         prompt: "",
-        enabled: true
+        enabled: true,
+        tools: ["log_alert", "capture_snapshot"]
     });
     renderAgentConfig();
 }
@@ -344,7 +371,7 @@ async function saveAgents() {
     }
     
     try {
-        const res = await fetch('/config/agents', {
+        const res = await fetch('/config/alerts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(agentConfig)
@@ -592,6 +619,126 @@ async function fetchData() {
     }
 }
 
+
+// ============== METRICS & ALERT HISTORY ==============
+
+async function fetchMetrics() {
+    try {
+        const res = await fetch('/metrics');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const cpu = Math.round(data.cpu_percent || 0);
+        const mem = Math.round(data.memory_percent || 0);
+
+        const cpuVal = document.getElementById('cpu-val');
+        const cpuBar = document.getElementById('cpu-bar');
+        const memVal = document.getElementById('mem-val');
+        const memBar = document.getElementById('mem-bar');
+
+        if (cpuVal) cpuVal.textContent = `${cpu}%`;
+        if (cpuBar) {
+            cpuBar.style.width = `${cpu}%`;
+            cpuBar.className = `h-1 rounded-full transition-all duration-500 ${
+                cpu > 80 ? 'bg-red-500' : cpu > 60 ? 'bg-yellow-500' : 'bg-blue-500'
+            }`;
+        }
+        if (memVal) memVal.textContent = `${mem}%`;
+        if (memBar) {
+            memBar.style.width = `${mem}%`;
+            memBar.className = `h-1 rounded-full transition-all duration-500 ${
+                mem > 85 ? 'bg-red-500' : mem > 70 ? 'bg-yellow-500' : 'bg-purple-500'
+            }`;
+        }
+
+        renderMetricsTable(data.streams || []);
+    } catch (e) {
+        console.error('[Metrics] Fetch error:', e);
+    }
+}
+
+function renderMetricsTable(streams) {
+    const container = document.getElementById('metrics-table');
+    if (!container) return;
+
+    if (streams.length === 0) {
+        container.innerHTML = '<p class="text-xs text-gray-400 italic">No streams active.</p>';
+        return;
+    }
+
+    let rows = streams.map(s => {
+        const latency = s.last_inference_ms != null
+            ? `${Math.round(s.last_inference_ms)}ms`
+            : '\u2014';
+        const latencyClass = s.last_inference_ms > 5000 ? 'text-red-600'
+            : s.last_inference_ms > 2000 ? 'text-yellow-600'
+            : 'text-emerald-600';
+        return `
+            <tr class="hover:bg-slate-50 transition-colors">
+                <td class="py-1.5 pr-3 font-semibold text-slate-700 truncate max-w-[100px]" title="${escapeHtml(s.stream_id)}">${escapeHtml(s.stream_id)}</td>
+                <td class="py-1.5 pr-3 text-right font-mono text-slate-600">${s.analysis_count ?? 0}</td>
+                <td class="py-1.5 pr-3 text-right font-mono text-slate-600">${s.alert_count ?? 0}</td>
+                <td class="py-1.5 text-right font-mono ${latencyClass}">${latency}</td>
+            </tr>`;
+    }).join('');
+
+    container.innerHTML = `
+        <table class="w-full text-xs border-collapse">
+            <thead>
+                <tr class="text-[9px] text-slate-400 uppercase tracking-wider border-b border-slate-200">
+                    <th class="text-left pb-2 pr-3 font-semibold">Stream</th>
+                    <th class="text-right pb-2 pr-3 font-semibold">Analyses</th>
+                    <th class="text-right pb-2 pr-3 font-semibold">Alerts</th>
+                    <th class="text-right pb-2 font-semibold">Last Inference</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">${rows}</tbody>
+        </table>`;
+}
+
+async function fetchAlertHistory() {
+    try {
+        const res = await fetch('/alerts/history?limit=50&answer=YES');
+        if (!res.ok) return;
+        const data = await res.json();
+        alertHistoryCache = data.events || [];
+        renderAlertHistory(alertHistoryCache);
+    } catch (e) {
+        console.error('[AlertHistory] Fetch error:', e);
+    }
+}
+
+function renderAlertHistory(events) {
+    const container = document.getElementById('alert-history');
+    if (!container) return;
+
+    if (events.length === 0) {
+        container.innerHTML = '<p class="text-xs text-gray-400 italic">No alerts fired yet.</p>';
+        return;
+    }
+
+    container.innerHTML = events.map(e => {
+        const isYes = e.answer === 'YES';
+        const badgeClass = isYes
+            ? 'bg-red-100 text-red-700'
+            : 'bg-green-100 text-green-700';
+        const ts = new Date(e.timestamp).toLocaleTimeString();
+        const severityDot = {
+            critical: 'bg-red-500',
+            high:     'bg-orange-500',
+            medium:   'bg-yellow-500',
+            low:      'bg-blue-400',
+        }[e.severity] || 'bg-slate-400';
+        return `
+            <div class="flex items-center gap-2 py-1.5 border-b border-slate-100 last:border-0 text-[10px]">
+                <span class="w-1.5 h-1.5 rounded-full shrink-0 ${severityDot}"></span>
+                <span class="font-mono text-slate-400 shrink-0 w-14">${ts}</span>
+                <span class="font-semibold text-slate-600 truncate max-w-[70px]" title="${escapeHtml(e.stream_id)}">${escapeHtml(e.stream_id)}</span>
+                <span class="flex-1 text-slate-500 truncate" title="${escapeHtml(e.alert_name)}">${escapeHtml(e.alert_name)}</span>
+                <span class="px-1.5 py-0.5 rounded font-bold shrink-0 ${badgeClass}">${e.answer}</span>
+            </div>`;
+    }).join('');
+}
 
 function escapeHtml(str) {
     if (!str) return '';
