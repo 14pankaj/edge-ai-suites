@@ -1,7 +1,7 @@
 # Copyright (C) 2025 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-name: ${PROJECT_NAME:-live-video-alert}
+name: ${PROJECT_NAME:-live-video-alert-agent}
 services:
   ovms-init:
     image: busybox:latest
@@ -92,10 +92,10 @@ services:
       retries: 5
       start_period: 300s
 
-  live-video-alert:
+  live-video-alert-agent:
     image: ${REGISTRY:-}live-video-alert:${TAG:-latest}
     build: .
-    container_name: live-video-alert
+    container_name: live-video-alert-agent
     restart: unless-stopped
     ports:
       - "${PORT:-9000}:${PORT:-9000}"
@@ -170,17 +170,7 @@ services:
       - MQTT_BASE_TOPIC=${MQTT_BASE_TOPIC:-alerts/live-video}
 
     volumes:
-      - ./resources:/app/resources
-      # Persist alert snapshots across container restarts
-      - snapshots:/app/snapshots
-
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${PORT:-9000}/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-
+      - ./resources:/temp/resources
     depends_on:
       ovms:
         condition: service_healthy

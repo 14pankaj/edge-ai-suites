@@ -36,7 +36,6 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy application source and static resources
 COPY --chown=appuser:appuser src/ ./src/
-COPY --chown=appuser:appuser resources/ ./resources/
 
 # Pre-create runtime directories so appuser can write to them even when
 # no external volume is mounted (snapshots, alert config persisted to disk)

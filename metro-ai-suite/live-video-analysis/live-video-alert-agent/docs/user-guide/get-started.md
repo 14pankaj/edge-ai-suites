@@ -114,7 +114,7 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
 
    View application logs:
      ```bash
-     docker logs agentic-nvr
+     docker logs live-video-alert-agent
      ```
 
 6. **Access the Dashboard**:
@@ -202,7 +202,7 @@ docker compose down
 docker compose restart
 
 # Restart only the application (VLM service keeps running)
-docker compose restart live-video-alert
+docker compose restart live-video-alert-agent
 ```
 
 ### Viewing Logs
@@ -215,7 +215,7 @@ docker compose logs -f
 docker logs -f ovms-vlm
 
 # Application logs
-docker logs -f live-video-alert
+docker logs -f live-video-alert-agent
 ```
 
 ### Clearing Model Cache
