@@ -16,6 +16,10 @@ import logging
 from email.message import EmailMessage
 from typing import Optional
 
+import aiosmtplib
+
+from src.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,21 +31,7 @@ async def send_email_alert(
     alert_name: str = "",
     severity: str = "medium",
 ) -> dict:
-    """
-    Send an email notification for a triggered alert.
-
-    Parameters
-    ----------
-    subject:    Email subject line.
-    body:       Plain-text email body.
-    recipient:  Override recipient address(es), comma-separated.
-                Falls back to the ALERT_EMAIL_TO setting.
-    stream_id:  Source stream (used in log messages).
-    alert_name: Alert name (used in log messages).
-    severity:   Alert severity (used in log messages).
-    """
-    from src.config import settings
-
+    """Send an SMTP email notification for a triggered alert."""
     smtp_host = settings.SMTP_HOST
     if not smtp_host:
         logger.warning("send_email_alert: SMTP_HOST not configured — skipping")
@@ -53,8 +43,6 @@ async def send_email_alert(
         return {"status": "skipped", "reason": "no recipient configured"}
 
     try:
-        import aiosmtplib
-
         msg = EmailMessage()
         msg["Subject"] = subject
         msg["From"] = settings.ALERT_EMAIL_FROM or settings.SMTP_USER

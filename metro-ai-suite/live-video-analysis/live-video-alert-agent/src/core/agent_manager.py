@@ -21,9 +21,11 @@ Key improvements
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -35,13 +37,36 @@ from .vlm_client import VLMClient
 from .event_manager import EventManager
 from .alert_state_manager import AlertStateManager
 from src.agentic.alert_agent import AlertActionAgent
-from src.agentic.tools.snapshot_tool import register_frame_callback, unregister_frame_callback
+from src.agentic.tools.snapshot_tool import (
+    register_frame_callback, unregister_frame_callback, capture_snapshot,
+)
 from src.schemas.monitor import AgentResult, AlertConfig, AlertSeverity
 from src.config import settings
 
 logger = logging.getLogger(__name__)
 
 _RESOURCES = Path("resources")
+_ACTION_WORKERS = 3  # Background workers for action dispatch
+
+
+def _atomic_write_json(path: str | Path, data: object) -> None:
+    """Write *data* as JSON to *path* atomically (write-tmp-then-rename).
+
+    Prevents a corrupt file if the process is killed mid-write.
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=target.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(data, fh, indent=2)
+        os.replace(tmp_path, target)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 class StreamMetrics:
@@ -65,7 +90,6 @@ class AgentManager:
     def __init__(
         self,
         vlm_url: str,
-        vlm_api_key: str,
         model_name: str,
         streams_config: str = str(_RESOURCES / "streams.json"),
         agents_config: str = str(_RESOURCES / "agents.json"),
@@ -73,45 +97,31 @@ class AgentManager:
         self._streams_config_file = streams_config
         self._agents_config_file = agents_config
 
-        # Camera streams: stream_id → LiveStreamManager
         self.streams: Dict[str, LiveStreamManager] = {}
 
-        # VLM client (shared across all stream loops)
         self.vlm_client = VLMClient(
             base_url=vlm_url,
-            api_key=vlm_api_key,
             model_name=model_name,
         )
 
-        # SSE pub/sub
+        self._vlm_semaphore = asyncio.Semaphore(settings.VLM_MAX_CONCURRENCY)
         self.events = EventManager()
-
-        # Alert state (dedup, cooldown, escalation, history)
         self.alert_state = AlertStateManager()
-
-        # Action agent (ADK or rule-based)
         self.action_agent = AlertActionAgent()
-
-        # Latest analysis results, exposed by /data legacy endpoint
-        # Structure: { stream_id: { alert_name: {"answer": ..., "reason": ...} } }
         self.latest_results: Dict[str, Dict] = {}
-
-        # Runtime metrics per stream
         self._metrics: Dict[str, StreamMetrics] = {}
-
-        # Per-stream analysis asyncio Tasks
         self._stream_tasks: Dict[str, asyncio.Task] = {}
+        self._action_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self._action_workers: List[asyncio.Task] = []
+        self.stream_tools: Dict[str, List[str]] = {}
+        self.stream_alerts: Dict[str, List[str]] = {}
+        self.stream_names: Dict[str, str] = {}
 
         self.running = False
         self._start_time: Optional[float] = None
 
-        # Load persistent configs
         self.alerts: List[AlertConfig] = self._load_alerts_config()
         self._load_streams_config()
-
-    # ------------------------------------------------------------------ #
-    # Lifecycle
-    # ------------------------------------------------------------------ #
 
     async def start(self):
         """Start all registered stream managers and their analysis loops."""
@@ -122,13 +132,18 @@ class AgentManager:
             mgr.start()
             self._launch_stream_task(stream_id)
 
+        for i in range(_ACTION_WORKERS):
+            t = asyncio.create_task(
+                self._action_worker(i), name=f"action-worker-{i}",
+            )
+            self._action_workers.append(t)
+
         logger.info(
             f"AgentManager started — {len(self.streams)} stream(s), "
             f"{len(self.alerts)} alert(s), "
             f"ADK={'on' if settings.USE_ADK else 'off'}"
         )
 
-        # Keep alive until stop() is called
         while self.running:
             await asyncio.sleep(5)
 
@@ -137,9 +152,17 @@ class AgentManager:
         self.running = False
         for task in self._stream_tasks.values():
             task.cancel()
+        for task in self._action_workers:
+            task.cancel()
+        self._action_workers.clear()
         for mgr in self.streams.values():
             mgr.stop()
         logger.info("AgentManager stopped")
+
+    def reload_action_agent(self):
+        """Rebuild the action agent so runtime tool registry changes take effect."""
+        self.action_agent = AlertActionAgent()
+        logger.info("Action agent reloaded")
 
     @property
     def uptime_seconds(self) -> float:
@@ -147,11 +170,7 @@ class AgentManager:
             return 0.0
         return time.monotonic() - self._start_time
 
-    # ------------------------------------------------------------------ #
-    # Stream management
-    # ------------------------------------------------------------------ #
-
-    def add_stream(self, stream_id: str, rtsp_url: str, save: bool = True):
+    def add_stream(self, stream_id: str, rtsp_url: str, name: str = "", tools: Optional[List[str]] = None, alerts: Optional[List[str]] = None, save: bool = True):
         if stream_id in self.streams:
             logger.warning(f"Stream '{stream_id}' already registered — ignoring")
             return
@@ -161,8 +180,10 @@ class AgentManager:
         self.latest_results[stream_id] = {}
         self._metrics[stream_id] = StreamMetrics()
         self.alert_state.register_stream(stream_id)
+        self.stream_tools[stream_id] = tools or []
+        self.stream_alerts[stream_id] = alerts or []
+        self.stream_names[stream_id] = name or stream_id
 
-        # Register snapshot callback
         register_frame_callback(
             stream_id,
             lambda sid: self._get_latest_frame(sid),
@@ -178,11 +199,6 @@ class AgentManager:
         logger.info(f"Stream added: {stream_id} → {rtsp_url}")
 
     def remove_stream(self, stream_id: str):
-        if stream_id not in self.streams:
-            return
-
-        # Cancel analysis task
-        task = self._stream_tasks.pop(stream_id, None)
         if task:
             task.cancel()
 
@@ -191,6 +207,9 @@ class AgentManager:
         self.latest_results.pop(stream_id, None)
         self._metrics.pop(stream_id, None)
         self.alert_state.unregister_stream(stream_id)
+        self.stream_tools.pop(stream_id, None)
+        self.stream_alerts.pop(stream_id, None)
+        self.stream_names.pop(stream_id, None)
         unregister_frame_callback(stream_id)
         self._save_streams_config()
         logger.info(f"Stream removed: {stream_id}")
@@ -205,12 +224,16 @@ class AgentManager:
         frames = mgr.get_recent_frames(count=1)
         return frames[0] if frames else None
 
-    # ------------------------------------------------------------------ #
-    # Alert / agent configuration
-    # ------------------------------------------------------------------ #
-
     def get_alerts_config(self) -> List[dict]:
         return [a.model_dump() for a in self.alerts]
+
+    def update_stream_alerts(self, stream_id: str, alerts: List[str]) -> None:
+        """Set the alert filter for a stream and persist it."""
+        if stream_id not in self.streams:
+            raise KeyError(f"Stream '{stream_id}' not found")
+        self.stream_alerts[stream_id] = alerts
+        self._save_streams_config()
+        logger.info(f"Stream '{stream_id}' alert filter updated: {alerts or 'all'}")
 
     def save_alerts_config(self, config_data: List[dict]) -> None:
         """Validate, apply, and persist new alert configurations."""
@@ -224,15 +247,10 @@ class AgentManager:
         self.alerts = new_alerts
         try:
             _RESOURCES.mkdir(parents=True, exist_ok=True)
-            with open(self._agents_config_file, "w") as fh:
-                json.dump([a.model_dump() for a in self.alerts], fh, indent=2)
+            _atomic_write_json(self._agents_config_file, [a.model_dump() for a in self.alerts])
             logger.info(f"Saved {len(self.alerts)} alert config(s)")
         except Exception as exc:
             logger.error(f"Failed to persist alert config: {exc}")
-
-    # ------------------------------------------------------------------ #
-    # Metrics
-    # ------------------------------------------------------------------ #
 
     def get_stream_metrics(self) -> List[dict]:
         results = []
@@ -245,19 +263,11 @@ class AgentManager:
             })
         return results
 
-    # ------------------------------------------------------------------ #
-    # SSE subscription
-    # ------------------------------------------------------------------ #
-
     async def subscribe(self) -> asyncio.Queue:
         return await self.events.subscribe()
 
     async def unsubscribe(self, queue: asyncio.Queue):
         await self.events.unsubscribe(queue)
-
-    # ------------------------------------------------------------------ #
-    # Per-stream analysis task
-    # ------------------------------------------------------------------ #
 
     def _launch_stream_task(self, stream_id: str):
         """Create and track an independent asyncio Task for one stream."""
@@ -296,22 +306,17 @@ class AgentManager:
         """
         logger.info(f"Analysis loop started for stream '{stream_id}'")
 
-        # Let the stream buffer pre-fill
-        await asyncio.sleep(2)
+        await asyncio.sleep(0.5)  # let stream buffer pre-fill
 
         while self.running and stream_id in self.streams:
             t_start = time.monotonic()
             await self._analyse_one_stream(stream_id)
 
             elapsed = time.monotonic() - t_start
-            sleep_time = max(0.1, settings.ANALYSIS_INTERVAL - elapsed)
+            sleep_time = max(0, settings.ANALYSIS_INTERVAL - elapsed)
             await asyncio.sleep(sleep_time)
 
         logger.info(f"Analysis loop exited for stream '{stream_id}'")
-
-    # ------------------------------------------------------------------ #
-    # Core analysis for one stream
-    # ------------------------------------------------------------------ #
 
     async def _analyse_one_stream(self, stream_id: str):
         """Run one VLM inference cycle for a single stream."""
@@ -327,20 +332,24 @@ class AgentManager:
         if not enabled:
             return
 
+        stream_alert_filter = self.stream_alerts.get(stream_id)
+        if stream_alert_filter:
+            enabled = [a for a in enabled if a.name in stream_alert_filter]
+        if not enabled:
+            return
+
         prompt = self._build_vlm_prompt(enabled)
 
         logger.debug(
             f"[{stream_id}] Inference cycle — frames={len(frames)} "
             f"alerts={[a.name for a in enabled]}"
         )
-        response = await self.vlm_client.analyze_stream_segment(
-            frames,
-            system_prompt=(
-                "You are a precise video analytics AI. "
-                "Always respond with valid JSON only, no markdown."
-            ),
-            user_prompt=prompt,
-        )
+        async with self._vlm_semaphore:
+            response = await self.vlm_client.analyze_stream_segment(
+                frames,
+                system_prompt="You are a precise video analytics AI. Always respond with valid JSON.",
+                user_prompt=prompt,
+            )
 
         metrics = self._metrics.get(stream_id)
         if metrics:
@@ -356,19 +365,11 @@ class AgentManager:
             return
 
         self.latest_results[stream_id] = parsed
-
-        # Broadcast raw results for the dashboard
         await self.events.broadcast("analysis", {
             "stream_id": stream_id,
             "results": parsed,
         })
-
-        # Process each alert through state manager + action agent
         await self._process_alerts(stream_id, enabled, parsed)
-
-    # ------------------------------------------------------------------ #
-    # Alert processing (state + actions)
-    # ------------------------------------------------------------------ #
 
     async def _process_alerts(
         self,
@@ -377,8 +378,8 @@ class AgentManager:
         parsed: dict,
     ):
         """
-        For each triggered alert: check cooldown/escalation, then dispatch
-        tools via the action agent.
+        For each triggered alert: check cooldown/escalation, then enqueue
+        action dispatch to the background worker pool (non-blocking).
         """
         for alert_cfg in enabled:
             result = parsed.get(alert_cfg.name)
@@ -409,104 +410,150 @@ class AgentManager:
             if not should_act:
                 continue
 
-            # Capture snapshot first (so path is available to other tools like email).
-            # Done here — NOT re-run inside dispatch — to avoid double-writing.
-            snapshot_path: Optional[str] = None
-            wants_snapshot = "capture_snapshot" in alert_cfg.tools or (
-                is_escalation
-                and alert_cfg.escalation
-                and "capture_snapshot" in alert_cfg.escalation.additional_tools
-            )
-            if wants_snapshot:
-                try:
-                    from src.agentic.tools.snapshot_tool import capture_snapshot
-                    snap_result = await capture_snapshot(
-                        stream_id=stream_id,
-                        alert_name=alert_cfg.name,
-                        severity=alert_cfg.severity.value,
-                    )
-                    snapshot_path = snap_result.get("path")
-                except Exception as snap_exc:
-                    logger.error(f"Snapshot capture failed for '{stream_id}': {snap_exc}")
-
-            # Build a tool list that excludes capture_snapshot — it was already
-            # invoked above, so passing it to dispatch would run it a second time.
-            import copy
-            dispatch_cfg = copy.copy(alert_cfg)
-            dispatch_cfg.tools = [t for t in alert_cfg.tools if t != "capture_snapshot"]
-
-            # Dispatch via action agent
-            actions_taken = await self.action_agent.dispatch(
-                stream_id=stream_id,
-                alert_cfg=dispatch_cfg,
-                answer=answer,
-                reason=reason,
-                consecutive_count=self.alert_state.get_consecutive_count(
-                    stream_id, alert_cfg.name
-                ),
-                escalated=is_escalation,
-                snapshot_path=snapshot_path,
-            )
-
-            # Re-add capture_snapshot to actions_taken if it succeeded
-            if snapshot_path and "capture_snapshot" not in actions_taken:
-                actions_taken = ["capture_snapshot"] + actions_taken
-
-            # Record to history
-            self.alert_state.record_event(
-                stream_id=stream_id,
-                alert_cfg=alert_cfg,
-                answer=answer,
-                reason=reason,
-                actions_taken=actions_taken,
-                escalated=is_escalation,
-                snapshot_path=snapshot_path,
-            )
-
-            # Broadcast enriched event to dashboard
             if answer == "YES":
-                await self.events.broadcast("alert_action", {
+                await self.events.broadcast("alert_fired", {
                     "stream_id": stream_id,
                     "alert_name": alert_cfg.name,
                     "severity": alert_cfg.severity.value,
                     "answer": answer,
                     "reason": reason,
-                    "actions_taken": actions_taken,
                     "escalated": is_escalation,
-                    "snapshot_path": snapshot_path,
                 })
 
-    # ------------------------------------------------------------------ #
-    # VLM prompt construction
-    # ------------------------------------------------------------------ #
+            stream_allowed = self.stream_tools.get(stream_id)
+            effective_tools = list(alert_cfg.tools)
+            if stream_allowed:
+                effective_tools = [t for t in effective_tools if t in stream_allowed]
+            if "log_alert" not in effective_tools:
+                effective_tools.insert(0, "log_alert")
 
-    def _build_vlm_prompt(self, enabled: List[AlertConfig]) -> str:
-        """
-        Build a single multi-question JSON prompt for all enabled alerts.
-        Batching all questions into one VLM call keeps inference costs low.
-        """
-        # Use json.dumps to safely serialise alert names/prompts (avoids
-        # f-string injection if names contain quotes or special characters)
-        questions = {a.name: a.prompt for a in enabled}
-        example_output = {
-            a.name: {"answer": "YES or NO", "reason": "brief explanation"}
-            for a in enabled
-        }
+            job = {
+                "stream_id": stream_id,
+                "alert_cfg": alert_cfg,
+                "effective_tools": effective_tools,
+                "answer": answer,
+                "reason": reason,
+                "consecutive_count": self.alert_state.get_consecutive_count(
+                    stream_id, alert_cfg.name
+                ),
+                "escalated": is_escalation,
+            }
+            try:
+                self._action_queue.put_nowait(job)
+            except asyncio.QueueFull:
+                logger.warning(
+                    f"Action queue full — dropping action for "
+                    f"[{stream_id}][{alert_cfg.name}]"
+                )
 
-        return (
-            "Analyse the provided image and answer ALL of the following questions.\n\n"
-            f"QUESTIONS:\n{json.dumps(questions, indent=2)}\n\n"
-            "RULES:\n"
-            "1. For each question answer with EXACTLY \"YES\" or \"NO\" (uppercase).\n"
-            "2. Provide a concise reason for each answer.\n"
-            "3. Include EVERY question key in your response — do not omit any.\n\n"
-            "OUTPUT (strict JSON, no markdown):\n"
-            f"{json.dumps(example_output, indent=2)}"
+    async def _action_worker(self, worker_id: int):
+        """Background worker that processes alert action jobs."""
+        logger.info(f"Action worker {worker_id} started")
+        while self.running:
+            try:
+                job = await asyncio.wait_for(
+                    self._action_queue.get(), timeout=2.0
+                )
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+
+            try:
+                await self._execute_action_job(job)
+            except Exception as exc:
+                logger.error(f"Action worker {worker_id} error: {exc}")
+            finally:
+                self._action_queue.task_done()
+        logger.info(f"Action worker {worker_id} stopped")
+
+    async def _execute_action_job(self, job: dict):
+        """Execute snapshot + tool dispatch + history recording for one alert."""
+        stream_id = job["stream_id"]
+        alert_cfg = job["alert_cfg"]
+        effective_tools = job["effective_tools"]
+        answer = job["answer"]
+        reason = job["reason"]
+        consecutive_count = job["consecutive_count"]
+        escalated = job["escalated"]
+
+        snapshot_path: Optional[str] = None
+        wants_snapshot = "capture_snapshot" in effective_tools or (
+            escalated
+            and alert_cfg.escalation
+            and "capture_snapshot" in alert_cfg.escalation.additional_tools
+        )
+        if wants_snapshot:
+            try:
+                snap_result = await capture_snapshot(
+                    stream_id=stream_id,
+                    alert_name=alert_cfg.name,
+                    severity=alert_cfg.severity.value,
+                )
+                snapshot_path = snap_result.get("path")
+            except Exception as snap_exc:
+                logger.error(
+                    f"Snapshot capture failed for '{stream_id}': {snap_exc}"
+                )
+
+        dispatch_cfg = copy.copy(alert_cfg)
+        dispatch_cfg.tools = [t for t in effective_tools if t != "capture_snapshot"]
+
+        actions_taken = await self.action_agent.dispatch(
+            stream_id=stream_id,
+            alert_cfg=dispatch_cfg,
+            answer=answer,
+            reason=reason,
+            consecutive_count=consecutive_count,
+            escalated=escalated,
+            snapshot_path=snapshot_path,
         )
 
-    # ------------------------------------------------------------------ #
-    # VLM response parsing
-    # ------------------------------------------------------------------ #
+        if snapshot_path and "capture_snapshot" not in actions_taken:
+            actions_taken = ["capture_snapshot"] + actions_taken
+
+        self.alert_state.record_event(
+            stream_id=stream_id,
+            alert_cfg=alert_cfg,
+            answer=answer,
+            reason=reason,
+            actions_taken=actions_taken,
+            escalated=escalated,
+            snapshot_path=snapshot_path,
+        )
+
+        if answer == "YES":
+            await self.events.broadcast("alert_action", {
+                "stream_id": stream_id,
+                "alert_name": alert_cfg.name,
+                "severity": alert_cfg.severity.value,
+                "answer": answer,
+                "reason": reason,
+                "actions_taken": actions_taken,
+                "escalated": escalated,
+                "snapshot_path": snapshot_path,
+            })
+
+    def _build_vlm_prompt(self, enabled: List[AlertConfig]) -> str:
+        """Build a batched multi-question JSON prompt for all enabled alerts."""
+        questions = {a.name: a.prompt for a in enabled}
+        return (
+            "You are an intelligent video monitoring assistant. "
+            "Analyze the image and answer EACH of the following questions.\n\n"
+            f"QUESTIONS TO ANSWER:\n{json.dumps(questions, indent=2)}\n\n"
+            "IMPORTANT RULES:\n"
+            "1. For each question, you MUST answer with EXACTLY \"YES\" or \"NO\" (uppercase, no other words)\n"
+            "2. Provide a brief reason explaining your answer\n"
+            "3. You must include every single question key in your JSON response. Do not skip any.\n\n"
+            "OUTPUT FORMAT (strict JSON):\n"
+            "{\n"
+            + ",\n".join([
+                f'  "{a.name}": {{"answer": "YES" or "NO", "reason": "your explanation"}}'
+                for a in enabled
+            ])
+            + "\n}\n\n"
+            "Return ONLY the JSON object, no markdown formatting."
+        )
 
     def _parse_vlm_response(
         self, response: str, enabled: List[AlertConfig]
@@ -548,10 +595,6 @@ class AgentManager:
             logger.error(f"Unexpected parse error: {exc}")
             return None
 
-    # ------------------------------------------------------------------ #
-    # Config persistence
-    # ------------------------------------------------------------------ #
-
     def _load_alerts_config(self) -> List[AlertConfig]:
         """Load alert configurations from JSON; return defaults on failure."""
         path = self._agents_config_file
@@ -591,6 +634,36 @@ class AgentManager:
             ),
         ]
 
+    def augment_alerts_with_mcp_tools(self):
+        """Append newly-discovered MCP tools to every alert's tools list.
+
+        Called after MCP servers are connected so that existing/persisted
+        alert configs automatically gain access to MCP tools without
+        manual editing.
+        """
+        from src.agentic.alert_agent import get_all_tools as _get_all_tools
+
+        all_tools, _ = _get_all_tools()
+        mcp_tool_names = [n for n in all_tools if n.startswith("mcp_")]
+        if not mcp_tool_names:
+            return
+
+        changed = False
+        for alert_cfg in self.alerts:
+            existing = set(alert_cfg.tools)
+            new_tools = [t for t in mcp_tool_names if t not in existing]
+            if new_tools:
+                alert_cfg.tools.extend(new_tools)
+                changed = True
+                logger.info(
+                    f"Alert '{alert_cfg.name}': added MCP tools {new_tools}"
+                )
+
+        if changed:
+            self.save_alerts_config(
+                [a.model_dump() for a in self.alerts]
+            )
+
     def _load_streams_config(self):
         path = self._streams_config_file
         if os.path.exists(path):
@@ -598,7 +671,13 @@ class AgentManager:
                 with open(path) as fh:
                     streams = json.load(fh)
                 for s in streams:
-                    self.add_stream(s["id"], s["url"], save=False)
+                    self.add_stream(
+                        s["id"], s["url"],
+                        name=s.get("name", ""),
+                        tools=s.get("tools", []),
+                        alerts=s.get("alerts", []),
+                        save=False,
+                    )
                 logger.info(f"Loaded {len(streams)} stream(s) from {path}")
             except Exception as exc:
                 logger.error(f"Failed to load stream config: {exc}")
@@ -606,8 +685,16 @@ class AgentManager:
     def _save_streams_config(self):
         try:
             _RESOURCES.mkdir(parents=True, exist_ok=True)
-            data = [{"id": sid, "url": m.rtsp_url} for sid, m in self.streams.items()]
-            with open(self._streams_config_file, "w") as fh:
-                json.dump(data, fh, indent=2)
+            data = [
+                {
+                    "id": sid,
+                    "name": self.stream_names.get(sid, sid),
+                    "url": m.rtsp_url,
+                    "tools": self.stream_tools.get(sid, []),
+                    "alerts": self.stream_alerts.get(sid, []),
+                }
+                for sid, m in self.streams.items()
+            ]
+            _atomic_write_json(self._streams_config_file, data)
         except Exception as exc:
             logger.error(f"Failed to save stream config: {exc}")

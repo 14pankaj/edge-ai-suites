@@ -18,6 +18,10 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
+import aiohttp
+
+from src.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,24 +29,13 @@ async def trigger_webhook(
     payload: Dict[str, Any],
     url: Optional[str] = None,
 ) -> dict:
-    """
-    POST a JSON payload to a webhook URL.
-
-    Parameters
-    ----------
-    payload:  Arbitrary dict that will be serialised as JSON.
-    url:      Override webhook URL; falls back to WEBHOOK_URL setting.
-    """
-    from src.config import settings
-
+    """POST a JSON payload to a webhook URL, optionally HMAC-signed."""
     endpoint = url or settings.WEBHOOK_URL
     if not endpoint:
         logger.warning("trigger_webhook: WEBHOOK_URL not configured — skipping")
         return {"status": "skipped", "reason": "WEBHOOK_URL not configured"}
 
     try:
-        import aiohttp
-
         body = json.dumps(payload, default=str).encode()
         headers = {"Content-Type": "application/json"}
 

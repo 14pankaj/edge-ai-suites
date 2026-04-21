@@ -99,11 +99,16 @@ class AlertStateManager:
         if is_transition:
             state.last_transition_ts = now
 
-        # --- consecutive YES counter ---
+        _NO_GRACE_LIMIT = 2
+
         if answer == "YES":
             state.consecutive_yes += 1
+            state.consecutive_no = 0
         else:
-            state.consecutive_yes = 0
+            state.consecutive_no += 1
+            if state.consecutive_no >= _NO_GRACE_LIMIT:
+                state.consecutive_yes = 0
+            # else: keep consecutive_yes intact (grace period)
 
         state.last_answer = answer  # type: ignore[assignment]
 

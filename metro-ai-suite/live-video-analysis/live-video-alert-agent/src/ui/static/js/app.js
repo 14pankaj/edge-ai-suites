@@ -6,18 +6,15 @@ const timestamp = document.getElementById('timestamp');
 const streamCount = document.getElementById('stream-count');
 
 let activeStreams = [];
+let streamMetadata = {};
 let cardStates = {};
 let agentConfig = [];
 let resultsCache = {};
+let availableTools = [];
 
 let eventSource = null;
 let pollingInterval = null;
 let sseConnected = false;
-
-let metricsInterval = null;
-let alertHistoryInterval = null;
-let alertHistoryCache = [];
-const ALERT_HISTORY_MAX = 50;
 
 function cssSafeId(str) {
     return str.replace(/[^a-zA-Z0-9-_]/g, '_');
@@ -47,24 +44,22 @@ function showToast(message, type = 'info') {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    await loadAvailableTools();
     await loadAgentConfig();
     await loadStreams();
 
     initSSE();
     initResizer();
 
-    await fetchMetrics();
-    await fetchAlertHistory();
-    metricsInterval = setInterval(fetchMetrics, 5000);
-    alertHistoryInterval = setInterval(fetchAlertHistory, 10000);
-
     window.addEventListener('beforeunload', () => {
         if (eventSource) {
             eventSource.close();
             eventSource = null;
         }
-        clearInterval(metricsInterval);
-        clearInterval(alertHistoryInterval);
+        if (metricsWs) {
+            metricsWs.close();
+            metricsWs = null;
+        }
     });
 });
 
@@ -122,16 +117,25 @@ function initSSE() {
         console.log('[SSE] Keepalive received');
     });
 
+    eventSource.addEventListener('alert_fired', (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            console.log('[SSE] Alert fired:', data.alert_name, data.stream_id);
+            if (!resultsCache[data.stream_id]) resultsCache[data.stream_id] = {};
+            resultsCache[data.stream_id][data.alert_name] = {
+                answer: data.answer,
+                reason: data.reason,
+            };
+            updateStreamResult(data.stream_id, resultsCache[data.stream_id]);
+        } catch (err) {
+            console.error('[SSE] alert_fired parse error:', err);
+        }
+    });
+
     eventSource.addEventListener('alert_action', (e) => {
         try {
             const data = JSON.parse(e.data);
-            if (data && data.stream_id) {
-                alertHistoryCache.unshift(data);
-                if (alertHistoryCache.length > ALERT_HISTORY_MAX) alertHistoryCache.pop();
-                renderAlertHistory(alertHistoryCache);
-            }
-            // Refresh metrics counters immediately on new alert
-            fetchMetrics();
+            console.log('[SSE] Alert action (tools completed):', data);
         } catch (err) {
             console.error('[SSE] alert_action parse error:', err);
         }
@@ -413,11 +417,65 @@ function updateAllDropdowns() {
     });
 }
 
+// ============== TOOL SELECTION FOR STREAMS ==============
+
+async function loadAvailableTools() {
+    try {
+        const res = await fetch('/tools');
+        const data = await res.json();
+        availableTools = (data.tools || []).filter(t => t.enabled);
+        renderToolCheckboxes();
+    } catch (e) {
+        console.error("Failed to load tools:", e);
+        availableTools = [];
+    }
+}
+
+function renderToolCheckboxes() {
+    const container = document.getElementById('tool-checkboxes');
+    if (!container) return;
+    if (availableTools.length === 0) {
+        container.innerHTML = '<span class="text-[9px] text-slate-400 italic">No tools available</span>';
+        return;
+    }
+    container.innerHTML = availableTools.map(tool => `
+        <label class="flex items-center gap-1.5 cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5 transition-colors">
+            <input type="checkbox" value="${escapeHtml(tool.name)}" checked
+                class="tool-checkbox w-3 h-3 rounded border-slate-300 text-blue-600 focus:ring-1 focus:ring-blue-500 cursor-pointer">
+            <span class="text-[10px] text-slate-600">${escapeHtml(tool.name)}</span>
+            <span class="text-[8px] text-slate-400 ml-auto">${escapeHtml(tool.source || 'builtin')}</span>
+        </label>
+    `).join('');
+}
+
+function getSelectedTools() {
+    const checkboxes = document.querySelectorAll('#tool-checkboxes input.tool-checkbox:checked');
+    return Array.from(checkboxes).map(cb => cb.value);
+}
+
+function toggleAllTools() {
+    const checkboxes = document.querySelectorAll('#tool-checkboxes input.tool-checkbox');
+    if (checkboxes.length === 0) return;
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    checkboxes.forEach(cb => cb.checked = !allChecked);
+}
+
 async function loadStreams() {
     try {
         const res = await fetch('/streams');
         const data = await res.json();
-        activeStreams = data.streams || [];
+        const streams = data.streams || [];
+        // Backend returns objects {id, url, tools, alerts, ...}; extract IDs for rendering
+        activeStreams = streams.map(s => typeof s === 'string' ? s : s.id);
+        streamMetadata = {};
+        streams.forEach(s => {
+            if (typeof s === 'object') {
+                streamMetadata[s.id] = s;
+                // Restore per-stream alert selection from persisted backend state
+                const a = s.alerts;
+                cardStates[s.id] = (a && a.length === 1) ? a[0] : '__ALL__';
+            }
+        });
         streamCount.textContent = activeStreams.length;
         renderGrid();
         renderStreamList();
@@ -435,10 +493,22 @@ function renderStreamList() {
     activeStreams.forEach(id => {
         const li = document.createElement('li');
         li.className = "flex justify-between items-center text-xs text-slate-600 bg-white p-2.5 rounded-md border border-slate-200 shadow-sm hover:border-blue-300 transition-all group";
+        const meta = streamMetadata[id];
+        const displayName = (meta && meta.name) ? meta.name : id;
+        const toolCount = meta && meta.tools && meta.tools.length > 0 ? meta.tools.length : null;
+        const toolBadge = toolCount
+            ? `<span class="text-[8px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 font-medium shrink-0">${toolCount} tools</span>`
+            : `<span class="text-[8px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 font-medium shrink-0">all tools</span>`;
+        const alertCount = meta && meta.alerts && meta.alerts.length > 0 ? meta.alerts.length : null;
+        const alertBadge = alertCount
+            ? `<span class="text-[8px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 font-medium shrink-0">${alertCount} alert${alertCount > 1 ? 's' : ''}</span>`
+            : `<span class="text-[8px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 font-medium shrink-0">all alerts</span>`;
         li.innerHTML = `
             <div class="flex items-center gap-2 overflow-hidden">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 shadow-[0_0_4px_rgba(16,185,129,0.4)]"></span>
-                <span class="font-semibold truncate" title="${escapeHtml(id)}">${escapeHtml(id)}</span>
+                <span class="font-semibold truncate" title="${escapeHtml(id)}">${escapeHtml(displayName)}</span>
+                ${toolBadge}
+                ${alertBadge}
             </div>
             <button onclick="deleteStream('${escapeHtml(id)}')" class="text-slate-300 hover:text-red-500 transition p-1 opacity-0 group-hover:opacity-100" title="Delete Stream">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -477,29 +547,33 @@ async function deleteStream(id) {
 }
 
 async function addNewStream() {
-    if (activeStreams.length >= 3) {
+    if (activeStreams.length >= 4) {
         showToast("Limit reached. Delete an existing stream first", "error");
         return;
     }
 
-    const id = document.getElementById('inp-stream-id').value.trim();
+    const name = (document.getElementById('inp-stream-name') || document.getElementById('inp-stream-id'))?.value.trim() || '';
     const url = document.getElementById('inp-stream-url').value.trim();
-    if(!id || !url) {
-        showToast("Please enter both ID and URL", "error");
+    if(!url) {
+        showToast("Please enter a stream URL", "error");
         return;
     }
-    
+
+    const tools = getSelectedTools();
+
     try {
         const res = await fetch('/streams', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({id, url})
+            body: JSON.stringify({name, url, tools})
         });
         if(res.ok) {
-            document.getElementById('inp-stream-id').value = '';
+            const result = await res.json();
+            const nameInput = document.getElementById('inp-stream-name') || document.getElementById('inp-stream-id');
+            if (nameInput) nameInput.value = '';
             document.getElementById('inp-stream-url').value = '';
             await loadStreams();
-            showToast(`Added stream '${id}'`, "success");
+            showToast(`Added stream '${result.id}'`, "success");
         } else {
             showToast("Failed to add stream", "error");
         }
@@ -511,6 +585,12 @@ async function addNewStream() {
 
 function updateCardAgent(streamId, agentName) {
     cardStates[streamId] = agentName;
+    const alerts = agentName === '__ALL__' ? [] : [agentName];
+    fetch(`/streams/${encodeURIComponent(streamId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alerts }),
+    }).catch(err => console.error('[PATCH stream alerts]', err));
 }
 
 // ============== VIDEO GRID RENDERING ==============
@@ -544,6 +624,8 @@ function renderGrid() {
         }
         
         const safeId = cssSafeId(id);
+        const meta = streamMetadata[id];
+        const displayName = (meta && meta.name) ? meta.name : id;
 
         // Card Container
         const card = document.createElement('div');
@@ -553,7 +635,7 @@ function renderGrid() {
         // Header (with Title + Live Badge)
         const header = document.createElement('div');
         header.className = "px-4 py-2 bg-gray-50 border-b border-gray-100 flex justify-between items-center";
-        header.innerHTML = `<span class="font-bold text-gray-700 text-sm overflow-hidden text-ellipsis whitespace-nowrap mr-2" title="${escapeHtml(id)}">${escapeHtml(id)}</span><span class="text-xs text-green-600 font-mono shrink-0">LIVE</span>`;
+        header.innerHTML = `<span class="font-bold text-gray-700 text-sm overflow-hidden text-ellipsis whitespace-nowrap mr-2" title="${escapeHtml(id)}">${escapeHtml(displayName)}</span><span class="text-xs text-green-600 font-mono shrink-0">LIVE</span>`;
 
         // Video Wrapper
         const videoWrapper = document.createElement('div');
@@ -620,124 +702,212 @@ async function fetchData() {
 }
 
 
-// ============== METRICS & ALERT HISTORY ==============
+// ============== SYSTEM METRICS (WebSocket from live-metrics-service) ==============
+let metricsWs = null;
+let metricsReconnectTimer = null;
+let cpuChart, gpuChart, memChart;
 
-async function fetchMetrics() {
-    try {
-        const res = await fetch('/metrics');
-        if (!res.ok) return;
-        const data = await res.json();
+// Track GPU engine metrics for aggregation
+const gpuEngineUsages = [];
 
-        const cpu = Math.round(data.cpu_percent || 0);
-        const mem = Math.round(data.memory_percent || 0);
+const MAX_DATA_POINTS = 60;
 
-        const cpuVal = document.getElementById('cpu-val');
-        const cpuBar = document.getElementById('cpu-bar');
-        const memVal = document.getElementById('mem-val');
-        const memBar = document.getElementById('mem-bar');
+function createChart(canvasId, label, color) {
+    const ctx = document.getElementById(canvasId)?.getContext('2d');
+    if (!ctx || typeof Chart === 'undefined') return null;
 
-        if (cpuVal) cpuVal.textContent = `${cpu}%`;
-        if (cpuBar) {
-            cpuBar.style.width = `${cpu}%`;
-            cpuBar.className = `h-1 rounded-full transition-all duration-500 ${
-                cpu > 80 ? 'bg-red-500' : cpu > 60 ? 'bg-yellow-500' : 'bg-blue-500'
-            }`;
+    const gradient = ctx.createLinearGradient(0, 0, 0, 128);
+    gradient.addColorStop(0, `${color}55`);
+    gradient.addColorStop(1, `${color}0f`);
+
+    return new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: label,
+                data: [],
+                borderColor: color,
+                backgroundColor: gradient,
+                borderWidth: 2,
+                fill: true,
+                tension: 0.35,
+                pointRadius: 0,
+                pointHoverRadius: 3
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { enabled: true }
+            },
+            scales: {
+                y: {
+                    suggestedMin: 0,
+                    suggestedMax: 100,
+                    grid: { color: '#e2e8f0' },
+                    ticks: { color: '#94a3b8' }
+                },
+                x: { display: false }
+            }
         }
-        if (memVal) memVal.textContent = `${mem}%`;
-        if (memBar) {
-            memBar.style.width = `${mem}%`;
-            memBar.className = `h-1 rounded-full transition-all duration-500 ${
-                mem > 85 ? 'bg-red-500' : mem > 70 ? 'bg-yellow-500' : 'bg-purple-500'
-            }`;
+    });
+}
+
+function initMetricsCharts() {
+    cpuChart = createChart('cpu-chart', 'CPU %', '#3b82f6');
+    gpuChart = createChart('gpu-chart', 'GPU %', '#10b981');
+    memChart = createChart('mem-chart', 'Memory %', '#a855f7');
+}
+
+function pushStatSample(chart, value) {
+    if (!chart) return;
+    const labels = chart.data.labels;
+    labels.push(new Date().toLocaleTimeString());
+    if (labels.length > MAX_DATA_POINTS) labels.shift();
+    const ds = chart.data.datasets[0];
+    ds.data.push(value);
+    if (ds.data.length > MAX_DATA_POINTS) ds.data.shift();
+    chart.update('none');
+}
+
+function initMetricsWebSocket() {
+    const wsUrl = `ws://${window.location.hostname}:9090/ws/clients`;
+
+    if (metricsWs) metricsWs.close();
+
+    metricsWs = new WebSocket(wsUrl);
+
+    metricsWs.onopen = () => {
+        updateMetricsStatus(true);
+        if (metricsReconnectTimer) {
+            clearTimeout(metricsReconnectTimer);
+            metricsReconnectTimer = null;
         }
+    };
 
-        renderMetricsTable(data.streams || []);
-    } catch (e) {
-        console.error('[Metrics] Fetch error:', e);
+    metricsWs.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.metrics) {
+                processMetrics(data.metrics);
+            }
+        } catch (err) {
+            console.error('[Metrics] Parse error:', err);
+        }
+    };
+
+    metricsWs.onclose = () => {
+        updateMetricsStatus(false);
+        scheduleMetricsReconnect();
+    };
+
+    metricsWs.onerror = () => {
+        updateMetricsStatus(false);
+    };
+}
+
+function scheduleMetricsReconnect() {
+    if (metricsReconnectTimer) return;
+    metricsReconnectTimer = setTimeout(() => {
+        metricsReconnectTimer = null;
+        initMetricsWebSocket();
+    }, 5000);
+}
+
+function updateMetricsStatus(connected) {
+    const dot = document.getElementById('metrics-status-dot');
+    const text = document.getElementById('metrics-status-text');
+    if (!dot || !text) return;
+
+    if (connected) {
+        dot.innerHTML = '<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>';
+        text.textContent = 'Live';
+    } else {
+        dot.innerHTML = '<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-slate-300 opacity-75"></span><span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-slate-400"></span>';
+        text.textContent = 'Connecting...';
     }
 }
 
-function renderMetricsTable(streams) {
-    const container = document.getElementById('metrics-table');
-    if (!container) return;
+function processMetrics(metrics) {
+    // Reset GPU engine tracking
+    gpuEngineUsages.length = 0;
 
-    if (streams.length === 0) {
-        container.innerHTML = '<p class="text-xs text-gray-400 italic">No streams active.</p>';
-        return;
+    metrics.forEach(metric => {
+        switch (metric.name) {
+            case 'cpu':
+                const cpuUsage = metric.fields?.usage_idle != null
+                    ? parseFloat((100 - metric.fields.usage_idle).toFixed(1))
+                    : null;
+                if (cpuUsage != null) {
+                    const cpuVal = document.getElementById('metrics-cpu-val');
+                    if (cpuVal) cpuVal.textContent = cpuUsage.toFixed(1) + '%';
+                    pushStatSample(cpuChart, cpuUsage);
+                    // Sidebar
+                    const sidebarCpuVal = document.getElementById('cpu-val');
+                    const sidebarCpuBar = document.getElementById('cpu-bar');
+                    if (sidebarCpuVal) sidebarCpuVal.textContent = cpuUsage.toFixed(1) + '%';
+                    if (sidebarCpuBar) sidebarCpuBar.style.width = cpuUsage + '%';
+                }
+                break;
+            case 'gpu_engine_usage':
+                // Collect all GPU engine usages
+                const engineUsage = metric.fields?.usage;
+                if (engineUsage != null) {
+                    gpuEngineUsages.push(parseFloat(engineUsage));
+                }
+                break;
+            case 'nvidia_smi':
+            case 'gpu':
+                // NVIDIA GPU or generic GPU metrics
+                const gpuUsage = metric.fields?.utilization_gpu || metric.fields?.usage_percent || 0;
+                if (gpuUsage != null) {
+                    const gpuVal = document.getElementById('metrics-gpu-val');
+                    if (gpuVal) gpuVal.textContent = parseFloat(gpuUsage).toFixed(1) + '%';
+                    pushStatSample(gpuChart, parseFloat(gpuUsage));
+                }
+                break;
+            case 'mem':
+                const memPercent = metric.fields?.used_percent;
+                if (memPercent != null) {
+                    const memVal = document.getElementById('metrics-mem-val');
+                    if (memVal) memVal.textContent = parseFloat(memPercent).toFixed(1) + '%';
+                    pushStatSample(memChart, parseFloat(memPercent));
+                    // Sidebar
+                    const sidebarMemVal = document.getElementById('mem-val');
+                    const sidebarMemBar = document.getElementById('mem-bar');
+                    if (sidebarMemVal) sidebarMemVal.textContent = parseFloat(memPercent).toFixed(1) + '%';
+                    if (sidebarMemBar) sidebarMemBar.style.width = memPercent + '%';
+                }
+                break;
+        }
+    });
+
+    // Calculate overall GPU usage from maximum engine utilization
+    if (gpuEngineUsages.length > 0) {
+        const maxGpuUsage = Math.max(...gpuEngineUsages);
+        const gpuVal = document.getElementById('metrics-gpu-val');
+        if (gpuVal) gpuVal.textContent = maxGpuUsage.toFixed(1) + '%';
+        pushStatSample(gpuChart, maxGpuUsage);
     }
-
-    let rows = streams.map(s => {
-        const latency = s.last_inference_ms != null
-            ? `${Math.round(s.last_inference_ms)}ms`
-            : '\u2014';
-        const latencyClass = s.last_inference_ms > 5000 ? 'text-red-600'
-            : s.last_inference_ms > 2000 ? 'text-yellow-600'
-            : 'text-emerald-600';
-        return `
-            <tr class="hover:bg-slate-50 transition-colors">
-                <td class="py-1.5 pr-3 font-semibold text-slate-700 truncate max-w-[100px]" title="${escapeHtml(s.stream_id)}">${escapeHtml(s.stream_id)}</td>
-                <td class="py-1.5 pr-3 text-right font-mono text-slate-600">${s.analysis_count ?? 0}</td>
-                <td class="py-1.5 pr-3 text-right font-mono text-slate-600">${s.alert_count ?? 0}</td>
-                <td class="py-1.5 text-right font-mono ${latencyClass}">${latency}</td>
-            </tr>`;
-    }).join('');
-
-    container.innerHTML = `
-        <table class="w-full text-xs border-collapse">
-            <thead>
-                <tr class="text-[9px] text-slate-400 uppercase tracking-wider border-b border-slate-200">
-                    <th class="text-left pb-2 pr-3 font-semibold">Stream</th>
-                    <th class="text-right pb-2 pr-3 font-semibold">Analyses</th>
-                    <th class="text-right pb-2 pr-3 font-semibold">Alerts</th>
-                    <th class="text-right pb-2 font-semibold">Last Inference</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100">${rows}</tbody>
-        </table>`;
 }
 
-async function fetchAlertHistory() {
-    try {
-        const res = await fetch('/alerts/history?limit=50&answer=YES');
-        if (!res.ok) return;
-        const data = await res.json();
-        alertHistoryCache = data.events || [];
-        renderAlertHistory(alertHistoryCache);
-    } catch (e) {
-        console.error('[AlertHistory] Fetch error:', e);
-    }
+// Initialize metrics system when page loads
+function initMetricsSystem() {
+    if (typeof Chart === 'undefined') return;
+    setTimeout(() => {
+        initMetricsCharts();
+        initMetricsWebSocket();
+    }, 100);
 }
 
-function renderAlertHistory(events) {
-    const container = document.getElementById('alert-history');
-    if (!container) return;
-
-    if (events.length === 0) {
-        container.innerHTML = '<p class="text-xs text-gray-400 italic">No alerts fired yet.</p>';
-        return;
-    }
-
-    container.innerHTML = events.map(e => {
-        const isYes = e.answer === 'YES';
-        const badgeClass = isYes
-            ? 'bg-red-100 text-red-700'
-            : 'bg-green-100 text-green-700';
-        const ts = new Date(e.timestamp).toLocaleTimeString();
-        const severityDot = {
-            critical: 'bg-red-500',
-            high:     'bg-orange-500',
-            medium:   'bg-yellow-500',
-            low:      'bg-blue-400',
-        }[e.severity] || 'bg-slate-400';
-        return `
-            <div class="flex items-center gap-2 py-1.5 border-b border-slate-100 last:border-0 text-[10px]">
-                <span class="w-1.5 h-1.5 rounded-full shrink-0 ${severityDot}"></span>
-                <span class="font-mono text-slate-400 shrink-0 w-14">${ts}</span>
-                <span class="font-semibold text-slate-600 truncate max-w-[70px]" title="${escapeHtml(e.stream_id)}">${escapeHtml(e.stream_id)}</span>
-                <span class="flex-1 text-slate-500 truncate" title="${escapeHtml(e.alert_name)}">${escapeHtml(e.alert_name)}</span>
-                <span class="px-1.5 py-0.5 rounded font-bold shrink-0 ${badgeClass}">${e.answer}</span>
-            </div>`;
-    }).join('');
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initMetricsSystem);
+} else {
+    initMetricsSystem();
 }
 
 function escapeHtml(str) {

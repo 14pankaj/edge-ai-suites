@@ -18,6 +18,8 @@ from typing import Optional
 
 import cv2
 
+from src.config import settings
+
 logger = logging.getLogger(__name__)
 
 # Registry: stream_id → frame retrieval callback (injected by AgentManager)
@@ -39,23 +41,12 @@ async def capture_snapshot(
     alert_name: str = "alert",
     severity: str = "medium",
 ) -> dict:
-    """
-    Save the current frame from *stream_id* as a JPEG snapshot.
-
-    Parameters
-    ----------
-    stream_id:   Source stream identifier.
-    alert_name:  Included in the filename for easy filtering.
-    severity:    Included in the filename for easy filtering.
-    """
-    from src.config import settings
-
+    """Save the current frame from stream_id as a JPEG snapshot to disk."""
     callback = _frame_callbacks.get(stream_id)
     if callback is None:
         logger.warning(f"capture_snapshot: no frame callback for stream '{stream_id}'")
         return {"status": "skipped", "reason": "no frame callback registered"}
 
-    # Retrieve frame (callback may be sync — run in thread pool if needed)
     try:
         frame = callback(stream_id)
     except Exception as exc:
@@ -65,7 +56,6 @@ async def capture_snapshot(
     if frame is None:
         return {"status": "skipped", "reason": "no frame available"}
 
-    # Build output path
     ts = time.strftime("%Y%m%d_%H%M%S")
     safe_alert = alert_name.replace(" ", "_").replace("/", "_")
     safe_stream = stream_id.replace("/", "_").replace(":", "_")
@@ -74,7 +64,6 @@ async def capture_snapshot(
     filename = f"{safe_alert}_{severity}_{ts}.jpg"
     path = os.path.join(out_dir, filename)
 
-    # Write to disk (blocking I/O in thread pool)
     def _write() -> bool:
         return cv2.imwrite(path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
 

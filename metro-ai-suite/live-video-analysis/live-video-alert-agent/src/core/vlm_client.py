@@ -26,34 +26,18 @@ logger = logging.getLogger(__name__)
 
 
 class VLMClient:
-    """
-    Async client for a single OVMS VLM endpoint.
+    """Async client for a single OVMS VLM endpoint."""
 
-    Parameters
-    ----------
-    base_url:
-        OpenAI-compatible API base URL (e.g. ``http://localhost:8000/v3``).
-    api_key:
-        API key (any non-empty string for OVMS).
-    model_name:
-        Model identifier registered in OVMS.
-    """
-
-    def __init__(self, base_url: str, api_key: str, model_name: str):
+    def __init__(self, base_url: str, model_name: str):
         self.model_name = model_name
         self._client = AsyncOpenAI(
             base_url=base_url,
-            api_key=api_key,
+            api_key="no-key",  # OVMS does not validate the key
             timeout=settings.VLM_TIMEOUT,
             max_retries=0,   # we implement our own retry below
         )
-        # Last inference duration in milliseconds (for metrics)
         self.last_inference_ms: Optional[float] = None
         logger.info(f"VLMClient initialised — model={model_name} url={base_url}")
-
-    # ------------------------------------------------------------------ #
-    # Public API
-    # ------------------------------------------------------------------ #
 
     async def analyze_stream_segment(
         self,
@@ -61,16 +45,7 @@ class VLMClient:
         system_prompt: str,
         user_prompt: str,
     ) -> Optional[str]:
-        """
-        Send one or more frames to the VLM together with the analysis prompt.
-
-        The system prompt is delivered as a separate ``system`` role message so
-        that models that honour role separation (Phi-3.5-Vision, InternVL2, …)
-        apply it correctly.
-
-        Returns the raw text content from the first completion choice, or
-        ``None`` on failure.
-        """
+        """Send frames to the VLM and return the raw text response, or None on failure."""
         if not frames:
             return None
 
@@ -89,7 +64,6 @@ class VLMClient:
             return None
 
         user_content.append({"type": "text", "text": user_prompt})
-
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
@@ -100,10 +74,6 @@ class VLMClient:
             f"url={self._client.base_url} frames={len(frames)}"
         )
         return await self._call_with_retry(messages)
-
-    # ------------------------------------------------------------------ #
-    # Internals
-    # ------------------------------------------------------------------ #
 
     def _encode_image(self, frame) -> Optional[str]:
         """Resize, JPEG-compress, and base64-encode a single frame."""
@@ -138,7 +108,7 @@ class VLMClient:
                     model=self.model_name,
                     messages=messages,
                     max_tokens=settings.VLM_MAX_TOKENS,
-                    temperature=0.1,
+                    temperature=0.0,
                 )
                 self.last_inference_ms = (time.monotonic() - t0) * 1000
                 logger.info(f"VLM inference complete — {self.last_inference_ms:.0f} ms (attempt {attempt + 1})")

@@ -20,7 +20,7 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
 
 2. **Navigate to the Directory**:
      ```bash
-     cd edge-ai-suites/metro-ai-suite/live-video-analysis/live-video-alert
+     cd edge-ai-suites/metro-ai-suite/live-video-analysis/live-video-alert-agent
      ```
 
 3. **Configure Image Registry and Tag**:
@@ -48,28 +48,16 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
    export LOG_LEVEL=DEBUG
    ```
 
-   **API authentication** (leave empty to disable):
-   ```bash
-   export API_KEY=my-secret-key
-   ```
-
    **Agentic dispatch — choose one mode:**
 
-   *Option A — Google ADK (requires internet + Gemini API key):*
+   *Option A — Google ADK with local OVMS (fully offline):*
    ```bash
    export USE_ADK=true
-   export GEMINI_API_KEY=<your-gemini-api-key>
-   export ADK_MODEL=gemini-2.0-flash-lite   # default
+   export LOCAL_LLM_URL=http://ovms:8000/v3
+   export LOCAL_LLM_MODEL=Phi-4-mini-instruct
    ```
 
-  *Option B — Local LLM via OVMS (fully offline):*
-   ```bash
-   export USE_LOCAL_LLM=true
-  export LOCAL_LLM_URL=http://ovms:8000/v3
-  export LOCAL_LLM_MODEL=Phi-4-mini-instruct
-   ```
-
-   *Option C — Rule-based (default, no LLM needed):*
+   *Option B — Rule-based (default, no LLM needed):*
    ```bash
    # No extra variables required
    ```
@@ -144,7 +132,6 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
    ```bash
    curl -X POST http://localhost:9000/config/alerts \
      -H "Content-Type: application/json" \
-     -H "X-API-Key: ${API_KEY}" \
      -d '[
        {
          "name": "Fire Detection",

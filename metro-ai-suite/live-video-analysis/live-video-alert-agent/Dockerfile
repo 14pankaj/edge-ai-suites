@@ -17,6 +17,7 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
     PORT=9000 \
     SNAPSHOT_DIR=/app/snapshots
 
@@ -34,20 +35,13 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Copy application source and static resources
+# Copy application source
 COPY --chown=appuser:appuser src/ ./src/
-
-# Pre-create runtime directories so appuser can write to them even when
-# no external volume is mounted (snapshots, alert config persisted to disk)
-RUN mkdir -p /app/snapshots /app/config \
-    && chown -R appuser:appuser /app/snapshots /app/config
+COPY --chown=appuser:appuser resources/tools.json ./resources/tools.json
+RUN mkdir -p /app/snapshots /app/config /app/resources \
+    && chown -R appuser:appuser /app/snapshots /app/config /app/resources
 
 USER appuser
-# EXPOSE is documentation; actual binding is controlled by docker-compose PORT var
 EXPOSE 9000
 
-# Liveness probe — relies on the /health endpoint added in this rewrite
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -sf http://localhost:${PORT:-9000}/health || exit 1
-
-CMD ["python", "src/main.py"]
+CMD ["python", "-m", "src.main"]
