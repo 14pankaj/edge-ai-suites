@@ -25,24 +25,7 @@ async def log_alert(
     escalated: bool = False,
     snapshot_path: Optional[str] = None,
 ) -> dict:
-    """
-    Log an alert detection event.
-
-    This tool is always executed for every YES detection regardless of
-    cooldown (recording is separate from action suppression handled by
-    AlertStateManager).
-
-    Parameters
-    ----------
-    stream_id:        Source stream identifier.
-    alert_name:       Alert configuration name.
-    severity:         Severity string (low / medium / high / critical).
-    answer:           "YES" or "NO".
-    reason:           VLM explanation.
-    consecutive_count: Consecutive YES detections at time of logging.
-    escalated:        Whether this event triggered escalation.
-    snapshot_path:    Optional path to saved snapshot file.
-    """
+    """Log an alert detection event. Always executed for every YES detection."""
     level = logging.WARNING if answer == "YES" else logging.DEBUG
     logger.log(
         level,

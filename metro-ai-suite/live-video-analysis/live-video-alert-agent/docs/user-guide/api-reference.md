@@ -3,18 +3,6 @@
 The Live Video Alert Agent exposes REST and SSE endpoints for management,
 data consumption, and operational monitoring.
 
-## Authentication
-
-When `API_KEY` is set, write endpoints and sensitive operations require the
-key in the `X-API-Key` request header:
-
-```bash
-curl -H "X-API-Key: <your-key>" -X POST ...
-```
-
-Read-only dashboard and observation endpoints are always open.
-
----
 
 ## Observability
 

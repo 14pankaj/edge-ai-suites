@@ -33,66 +33,43 @@ import json
 import logging
 import os
 import time
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import cv2
 import psutil
-from fastapi import Body, Depends, FastAPI, HTTPException, Request, Security, status
+from fastapi import Body, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.core.agent_manager import AgentManager
 from src.config import settings, setup_logging
 from src.schemas.api import (
-    ErrorResponse,
     HealthResponse,
     StreamAddRequest,
+    StreamPatchRequest,
     StreamResponse,
     StreamStatus,
     SystemMetrics,
-    ToolInfo,
     ToolInvokeRequest,
     ToolInvokeResponse,
 )
 from src.schemas.monitor import AlertConfig, AlertSeverity
+from src.agentic.mcp_client import (
+    initialize_mcp_servers,
+    shutdown_mcp_servers,
+    get_mcp_server_status,
+    get_mcp_tools,
+)
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# ------------------------------------------------------------------ #
-# Startup / shutdown time tracking
-# ------------------------------------------------------------------ #
 _startup_time: float = time.monotonic()
 
-# ------------------------------------------------------------------ #
-# Authentication
-# ------------------------------------------------------------------ #
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-def verify_api_key(key: Optional[str] = Security(_api_key_header)):
-    """
-    If API_KEY is configured, all write and sensitive endpoints require the
-    key in the ``X-API-Key`` header.  Read-only UI endpoints are always open.
-    """
-    if settings.API_KEY and key != settings.API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key",
-        )
-
-
-# ------------------------------------------------------------------ #
-# Application factory / lifespan
-# ------------------------------------------------------------------ #
 manager: Optional[AgentManager] = None
 _manager_task: Optional[asyncio.Task] = None
 
@@ -106,11 +83,27 @@ async def lifespan(app: FastAPI):
         f"model={settings.MODEL_NAME} ADK={'on' if settings.USE_ADK else 'off'}"
     )
 
+    # Initialize MCP servers if enabled
+    if settings.MCP_ENABLED:
+        logger.info("Initializing MCP servers...")
+        mcp_tools, mcp_schemas = await initialize_mcp_servers()
+        if mcp_tools:
+            # Register MCP tools with the alert agent
+            from src.agentic import register_mcp_tools
+            register_mcp_tools(mcp_tools, mcp_schemas)
+        logger.info(f"MCP initialization complete: {len(mcp_tools)} tool(s) available")
+
     manager = AgentManager(
         vlm_url=settings.VLM_URL,
-        vlm_api_key=settings.VLM_API_KEY,
         model_name=settings.MODEL_NAME,
     )
+
+    # If MCP tools were registered, augment alert configs and reinit ADK
+    # so the agent prompt and tool list include MCP server details and tools.
+    if settings.MCP_ENABLED and mcp_tools:
+        manager.augment_alerts_with_mcp_tools()
+        if settings.USE_ADK:
+            manager.action_agent.reinit_adk()
 
     if settings.RTSP_URL:
         manager.add_stream("default", settings.RTSP_URL)
@@ -129,6 +122,14 @@ async def lifespan(app: FastAPI):
 
     # Graceful shutdown
     logger.info("Shutting down ...")
+    
+    # Shutdown MCP servers and clear tools from alert agent
+    if settings.MCP_ENABLED:
+        logger.info("Shutting down MCP servers...")
+        from src.agentic import clear_mcp_tools
+        clear_mcp_tools()
+        await shutdown_mcp_servers()
+    
     if manager:
         manager.stop()
     if _manager_task and not _manager_task.done():
@@ -163,19 +164,11 @@ if os.path.exists(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 
-# ------------------------------------------------------------------ #
-# Helper
-# ------------------------------------------------------------------ #
-
 def _require_manager() -> AgentManager:
     if manager is None:
         raise HTTPException(status_code=503, detail="Manager not initialised")
     return manager
 
-
-# ------------------------------------------------------------------ #
-# Health & Readiness
-# ------------------------------------------------------------------ #
 
 @app.get("/health", response_model=HealthResponse, tags=["Observability"])
 async def health():
@@ -205,10 +198,6 @@ async def ready():
     return {"status": "ready", "streams": len(manager.streams), "alerts": enabled}
 
 
-# ------------------------------------------------------------------ #
-# Metrics
-# ------------------------------------------------------------------ #
-
 @app.get("/metrics", response_model=SystemMetrics, tags=["Observability"])
 async def metrics():
     """System CPU/memory and per-stream inference counters."""
@@ -228,10 +217,6 @@ async def metrics():
         ],
     )
 
-
-# ------------------------------------------------------------------ #
-# SSE events
-# ------------------------------------------------------------------ #
 
 async def _event_generator(request: Request):
     """
@@ -288,10 +273,6 @@ async def sse_events(request: Request):
     )
 
 
-# ------------------------------------------------------------------ #
-# Video feed (MJPEG)
-# ------------------------------------------------------------------ #
-
 async def _mjpeg_generator(stream_id: str):
     while True:
         if manager is None:
@@ -323,9 +304,6 @@ async def video_feed(stream_id: str = "default"):
     )
 
 
-# ------------------------------------------------------------------ #
-# Legacy polling
-# ------------------------------------------------------------------ #
 
 @app.get("/data", tags=["Streaming"])
 async def get_data():
@@ -335,9 +313,6 @@ async def get_data():
     return JSONResponse(content={})
 
 
-# ------------------------------------------------------------------ #
-# Stream management
-# ------------------------------------------------------------------ #
 
 @app.get("/streams", tags=["Streams"])
 async def get_streams():
@@ -349,11 +324,14 @@ async def get_streams():
         result.append(
             StreamStatus(
                 id=sid,
+                name=mgr.stream_names.get(sid, ""),
                 url=stream_mgr.rtsp_url,
                 connected=health.connected,
                 fps=round(health.actual_capture_fps, 2),
                 resolution=health.resolution,
                 buffer_fill=health.buffer_fill,
+                tools=mgr.stream_tools.get(sid, []),
+                alerts=mgr.stream_alerts.get(sid, []),
             ).model_dump()
         )
     return JSONResponse(content={"streams": result})
@@ -362,20 +340,19 @@ async def get_streams():
 @app.post("/streams", response_model=StreamResponse, tags=["Streams"])
 async def add_stream(
     data: StreamAddRequest = Body(...),
-    _: None = Depends(verify_api_key),
 ):
     """Register a new video stream."""
     mgr = _require_manager()
-    if data.id in mgr.streams:
-        raise HTTPException(status_code=409, detail=f"Stream '{data.id}' already exists")
-    mgr.add_stream(data.id, data.url)
-    return StreamResponse(status="added", id=data.id)
+    stream_id = data.resolve_id()
+    if stream_id in mgr.streams:
+        raise HTTPException(status_code=409, detail=f"Stream '{stream_id}' already exists")
+    mgr.add_stream(stream_id, data.url, name=data.name, tools=data.tools, alerts=data.alerts)
+    return StreamResponse(status="added", id=stream_id)
 
 
 @app.delete("/streams/{stream_id}", response_model=StreamResponse, tags=["Streams"])
 async def remove_stream(
     stream_id: str,
-    _: None = Depends(verify_api_key),
 ):
     """Remove a registered stream."""
     mgr = _require_manager()
@@ -385,9 +362,22 @@ async def remove_stream(
     return StreamResponse(status="removed", id=stream_id)
 
 
-# ------------------------------------------------------------------ #
-# Alert configuration
-# ------------------------------------------------------------------ #
+@app.patch("/streams/{stream_id}", tags=["Streams"])
+async def patch_stream(
+    stream_id: str,
+    data: StreamPatchRequest = Body(...),
+):
+    """Update per-stream settings (e.g. alert filter)."""
+    mgr = _require_manager()
+    if stream_id not in mgr.streams:
+        raise HTTPException(status_code=404, detail=f"Stream '{stream_id}' not found")
+    if data.alerts is not None:
+        mgr.update_stream_alerts(stream_id, data.alerts)
+    return JSONResponse(content={
+        "id": stream_id,
+        "alerts": mgr.stream_alerts.get(stream_id, []),
+    })
+
 
 @app.get("/config/alerts", tags=["Configuration"])
 async def get_alerts_config():
@@ -399,7 +389,6 @@ async def get_alerts_config():
 @app.post("/config/alerts", tags=["Configuration"])
 async def update_alerts_config(
     data: List[dict] = Body(...),
-    _: None = Depends(verify_api_key),
 ):
     """
     Replace the full alert configuration.
@@ -421,33 +410,11 @@ async def update_alerts_config(
     return JSONResponse(content={"status": "saved", "count": len(data)})
 
 
-# ------------------------------------------------------------------ #
-# Tools
-# ------------------------------------------------------------------ #
-
-_TOOL_DESCRIPTIONS = {
-    "log_alert": "Log alert event to application log and history (always available)",
-    "send_email": "Send SMTP email notification (requires SMTP_HOST)",
-    "trigger_webhook": "HTTP POST to an external webhook URL (requires WEBHOOK_URL)",
-    "capture_snapshot": "Save current frame as JPEG snapshot (requires SNAPSHOT_DIR writable)",
-    "publish_mqtt": "Publish alert to MQTT broker (requires MQTT_BROKER)",
-}
-
-
 @app.get("/tools", tags=["Tools"])
 async def list_tools():
     """List all registered action tools and their configuration status."""
-    tools = []
-    for name, desc in _TOOL_DESCRIPTIONS.items():
-        enabled = True
-        if name == "send_email" and not settings.SMTP_HOST:
-            enabled = False
-        elif name == "trigger_webhook" and not settings.WEBHOOK_URL:
-            enabled = False
-        elif name == "publish_mqtt" and not settings.MQTT_BROKER:
-            enabled = False
-
-        tools.append(ToolInfo(name=name, description=desc, enabled=enabled).model_dump())
+    from src.agentic import get_available_tools
+    tools = get_available_tools()
     return JSONResponse(content={"tools": tools})
 
 
@@ -455,20 +422,9 @@ async def list_tools():
 async def invoke_tool(
     tool_name: str,
     request: ToolInvokeRequest = Body(default=None),
-    _: None = Depends(verify_api_key),
 ):
     """Manually invoke a registered tool for testing."""
-    from src.agentic.tools import (
-        log_alert, send_email_alert, trigger_webhook, capture_snapshot, publish_mqtt,
-    )
-
-    _TOOL_MAP = {
-        "log_alert": log_alert,
-        "send_email": send_email_alert,
-        "trigger_webhook": trigger_webhook,
-        "capture_snapshot": capture_snapshot,
-        "publish_mqtt": publish_mqtt,
-    }
+    from src.agentic.alert_agent import _TOOL_MAP
 
     fn = _TOOL_MAP.get(tool_name)
     if fn is None:
@@ -495,9 +451,146 @@ async def invoke_tool(
         )
 
 
-# ------------------------------------------------------------------ #
-# Alert history
-# ------------------------------------------------------------------ #
+@app.post("/tools/reload", tags=["Tools"])
+async def reload_tools_endpoint():
+    """Reload tools from resources/tools.json without restarting the app."""
+    from src.agentic import reload_tools
+    count = reload_tools()
+    if manager is not None:
+        manager.reload_action_agent()
+    return JSONResponse(content={"status": "ok", "tools_loaded": count})
+
+
+@app.get("/mcp/status", tags=["MCP"])
+async def mcp_status():
+    """
+    Get status of all configured MCP servers.
+    
+    Returns connection status, transport type, and available tools per server.
+    """
+    if not settings.MCP_ENABLED:
+        return JSONResponse(content={
+            "enabled": False,
+            "servers": [],
+            "total_tools": 0,
+        })
+    
+    servers = get_mcp_server_status()
+    tools = get_mcp_tools()
+    
+    return JSONResponse(content={
+        "enabled": True,
+        "servers": servers,
+        "total_tools": len(tools),
+    })
+
+
+@app.get("/mcp/tools", tags=["MCP"])
+async def mcp_tools():
+    """
+    List all tools available from connected MCP servers.
+    
+    Tools are prefixed with 'mcp_{server_name}_' to distinguish from built-in tools.
+    """
+    if not settings.MCP_ENABLED:
+        return JSONResponse(content={"tools": [], "count": 0})
+    
+    tools = get_mcp_tools()
+    tool_list = [
+        {
+            "name": t.name,
+            "description": t.description,
+            "server": t.server,
+            "input_schema": t.input_schema,
+        }
+        for t in tools.values()
+    ]
+    
+    return JSONResponse(content={"tools": tool_list, "count": len(tool_list)})
+
+
+@app.post("/mcp/reload", tags=["MCP"])
+async def mcp_reload():
+    """Reload MCP server configuration and reconnect to all servers."""
+    if not settings.MCP_ENABLED:
+        return JSONResponse(content={
+            "status": "skipped",
+            "reason": "MCP is disabled",
+            "tools_loaded": 0,
+        })
+    
+    try:
+        # Clear existing MCP tools from alert agent
+        from src.agentic import clear_mcp_tools, register_mcp_tools
+        clear_mcp_tools()
+        
+        # Reload MCP servers and get new tools
+        from src.agentic.mcp_client import initialize_mcp_servers, shutdown_mcp_servers
+        await shutdown_mcp_servers()
+        mcp_tools, mcp_schemas = await initialize_mcp_servers()
+        
+        # Register new tools with alert agent
+        if mcp_tools:
+            register_mcp_tools(mcp_tools, mcp_schemas)
+        if manager is not None:
+            manager.reload_action_agent()
+        
+        return JSONResponse(content={
+            "status": "ok",
+            "tools_loaded": len(mcp_tools),
+        })
+    except Exception as exc:
+        logger.error(f"MCP reload failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"MCP reload failed: {exc}")
+
+
+@app.post("/mcp/tools/{tool_name}/invoke", tags=["MCP"])
+async def invoke_mcp_tool(
+    tool_name: str,
+    request: ToolInvokeRequest = Body(default=None),
+):
+    """Manually invoke an MCP tool for testing."""
+    if not settings.MCP_ENABLED:
+        raise HTTPException(status_code=503, detail="MCP is disabled")
+    
+    tools = get_mcp_tools()
+    tool = tools.get(tool_name)
+    
+    if tool is None:
+        raise HTTPException(status_code=404, detail=f"MCP tool '{tool_name}' not found")
+    
+    # Get the server connection for this tool
+    from src.agentic.mcp_client import get_mcp_servers
+    servers = get_mcp_servers()
+    server = servers.get(tool.server)
+    
+    if server is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"MCP server '{tool.server}' is not connected"
+        )
+    
+    params = request.parameters if request else {}
+    t0 = time.monotonic()
+    
+    try:
+        result = await server.call_tool(tool_name, params)
+        duration_ms = (time.monotonic() - t0) * 1000
+        return ToolInvokeResponse(
+            tool=tool_name,
+            status="success" if result.get("status") != "error" else "error",
+            result=result,
+            duration_ms=round(duration_ms, 1),
+        )
+    except Exception as exc:
+        duration_ms = (time.monotonic() - t0) * 1000
+        return ToolInvokeResponse(
+            tool=tool_name,
+            status="error",
+            result={"error": str(exc)},
+            duration_ms=round(duration_ms, 1),
+        )
+
 
 @app.get("/alerts/history", tags=["Alerts"])
 async def get_alert_history(
@@ -534,10 +627,6 @@ async def get_alert_history(
     })
 
 
-# ------------------------------------------------------------------ #
-# Dashboard UI
-# ------------------------------------------------------------------ #
-
 @app.get("/", response_class=HTMLResponse, tags=["UI"])
 async def read_root():
     ui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui", "index.html")
@@ -546,10 +635,6 @@ async def read_root():
     with open(ui_path) as fh:
         return HTMLResponse(content=fh.read())
 
-
-# ------------------------------------------------------------------ #
-# Entry-point
-# ------------------------------------------------------------------ #
 
 if __name__ == "__main__":
     import uvicorn

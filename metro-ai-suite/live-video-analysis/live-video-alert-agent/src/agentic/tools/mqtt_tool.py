@@ -5,24 +5,9 @@
 publish_mqtt tool — publishes alert notifications to an MQTT broker.
 
 Configuration (environment variables):
-    MQTT_BROKER      — hostname/IP of the MQTT broker
-    MQTT_PORT        — broker port (default 1883)
-    MQTT_USERNAME    — optional username
-    MQTT_PASSWORD    — optional password
-    MQTT_BASE_TOPIC  — base topic prefix (default: live-video-alerts)
+    MQTT_BROKER, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD, MQTT_BASE_TOPIC
 
-Published topic:   {MQTT_BASE_TOPIC}/{stream_id}/{alert_name}
-Payload format (JSON):
-    {
-        "stream_id":  "cam1",
-        "alert_name": "Fire Detection",
-        "severity":   "critical",
-        "answer":     "YES",
-        "reason":     "Flames visible in upper right corner",
-        "timestamp":  "2026-02-20T14:35:00Z"
-    }
-
-Requires: paho-mqtt>=2.0.0
+Published topic: {MQTT_BASE_TOPIC}/{stream_id}/{alert_name}
 """
 
 import asyncio
@@ -31,6 +16,10 @@ import logging
 import time
 from datetime import datetime, timezone
 from typing import Optional
+
+import paho.mqtt.client as mqtt
+
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -43,20 +32,7 @@ async def publish_mqtt(
     reason: str,
     topic_override: Optional[str] = None,
 ) -> dict:
-    """
-    Publish an alert event to an MQTT broker.
-
-    Parameters
-    ----------
-    stream_id:      Source stream identifier.
-    alert_name:     Alert configuration name.
-    severity:       Alert severity string.
-    answer:         "YES" or "NO".
-    reason:         VLM explanation.
-    topic_override: Use this topic instead of the default pattern.
-    """
-    from src.config import settings
-
+    """Publish an alert event to an MQTT broker."""
     broker = settings.MQTT_BROKER
     if not broker:
         logger.warning("publish_mqtt: MQTT_BROKER not configured — skipping")
@@ -78,8 +54,6 @@ async def publish_mqtt(
     })
 
     def _publish():
-        import paho.mqtt.client as mqtt
-
         client = mqtt.Client(
             client_id=f"live-video-alert-{int(time.time())}",
             protocol=mqtt.MQTTv5,

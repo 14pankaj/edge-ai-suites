@@ -7,32 +7,45 @@ API request and response schemas (Pydantic models for all FastAPI endpoints).
 
 from __future__ import annotations
 
-from datetime import datetime
+import re
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
 
-# ------------------------------------------------------------------ #
-# Stream management
-# ------------------------------------------------------------------ #
-
 class StreamAddRequest(BaseModel):
-    id: str = Field(
-        ...,
-        min_length=1,
+    id: Optional[str] = Field(
+        default=None,
         max_length=64,
-        description="Unique stream identifier (alphanumeric, hyphens, underscores)",
+        description="Stream ID (auto-generated UUID if omitted)",
+    )
+    name: str = Field(
+        default="",
+        max_length=128,
+        description="Human-readable stream label",
     )
     url: str = Field(..., description="RTSP, HTTP, HTTPS, or file:// URL")
+    tools: List[str] = Field(
+        default_factory=list,
+        description="Allowed tools for this stream (empty = all tools allowed)",
+    )
+    alerts: List[str] = Field(
+        default_factory=list,
+        description="Alert names to evaluate for this stream (empty = all enabled alerts)",
+    )
 
     @field_validator("id")
     @classmethod
-    def id_safe(cls, v: str) -> str:
-        import re
-        if not re.match(r"^[a-zA-Z0-9_\-]+$", v):
+    def id_safe(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not re.match(r"^[a-zA-Z0-9_\-]+$", v):
             raise ValueError("Stream ID may only contain letters, digits, hyphens and underscores")
         return v
+
+    def resolve_id(self) -> str:
+        """Return the explicit id or generate a short UUID."""
+        return self.id if self.id else uuid.uuid4().hex[:12]
 
     @field_validator("url")
     @classmethod
@@ -50,16 +63,19 @@ class StreamResponse(BaseModel):
 
 class StreamStatus(BaseModel):
     id: str
+    name: str = ""
     url: str
     connected: bool
     fps: Optional[float] = None
     resolution: Optional[str] = None
     buffer_fill: int = 0
+    tools: List[str] = []
+    alerts: List[str] = []
 
 
-# ------------------------------------------------------------------ #
-# Health & readiness
-# ------------------------------------------------------------------ #
+class StreamPatchRequest(BaseModel):
+    alerts: Optional[List[str]] = None
+
 
 class HealthResponse(BaseModel):
     status: Literal["healthy", "degraded", "unhealthy"]
@@ -69,10 +85,6 @@ class HealthResponse(BaseModel):
     uptime_seconds: float
     timestamp: datetime
 
-
-# ------------------------------------------------------------------ #
-# Metrics (Prometheus-ready summary)
-# ------------------------------------------------------------------ #
 
 class StreamMetrics(BaseModel):
     stream_id: str
@@ -86,10 +98,6 @@ class SystemMetrics(BaseModel):
     memory_percent: float
     streams: List[StreamMetrics] = Field(default_factory=list)
 
-
-# ------------------------------------------------------------------ #
-# Tools
-# ------------------------------------------------------------------ #
 
 class ToolInfo(BaseModel):
     name: str
@@ -109,10 +117,6 @@ class ToolInvokeResponse(BaseModel):
     duration_ms: float
 
 
-# ------------------------------------------------------------------ #
-# Alert history
-# ------------------------------------------------------------------ #
-
 class AlertHistoryQuery(BaseModel):
     stream_id: Optional[str] = None
     alert_name: Optional[str] = None
@@ -121,12 +125,8 @@ class AlertHistoryQuery(BaseModel):
     limit: int = Field(default=50, ge=1, le=500)
 
 
-# ------------------------------------------------------------------ #
-# Standard error envelope
-# ------------------------------------------------------------------ #
-
 class ErrorResponse(BaseModel):
     error: str
     detail: str
     code: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))

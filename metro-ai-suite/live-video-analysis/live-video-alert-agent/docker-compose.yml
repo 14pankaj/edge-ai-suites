@@ -3,49 +3,29 @@
 
 name: ${PROJECT_NAME:-live-video-alert-agent}
 services:
-  ovms-init:
-    image: busybox:latest
-    container_name: ovms-init
+  ovms-download:
+    image: python:3.12-slim
+    container_name: ovms-download
     user: "0:0"
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - http_proxy=${http_proxy}
+      - HTTP_PROXY=${http_proxy}
+      - https_proxy=${https_proxy}
+      - HTTPS_PROXY=${https_proxy}
+      - no_proxy=${no_proxy}
+      - NO_PROXY=${no_proxy}
+      - VLM_NAME=${MODEL_NAME:-Phi-3.5-Vision}
+      - VLM_REPO=${OVMS_VLM_SOURCE_MODEL:-OpenVINO/Phi-3.5-vision-instruct-int4-ov}
+      - LLM_NAME=${LOCAL_LLM_MODEL:-Phi-4-mini-instruct-int4-ov}
+      - LLM_REPO=${OVMS_LLM_SOURCE_MODEL:-OpenVINO/Phi-4-mini-instruct-int4-ov}
+      - TARGET_DEVICE=${OVMS_TARGET_DEVICE:-CPU}
     volumes:
       - ovms-models:/models
-    command: sh -c "chown -R 5000:5000 /models && chmod -R 755 /models"
-
-  ovms-config:
-    image: busybox:latest
-    container_name: ovms-config
-    user: "0:0"
-    depends_on:
-      ovms-init:
-        condition: service_completed_successfully
-    volumes:
-      - ovms-models:/models
-    command:
-      - sh
-      - -c
-      - |
-        cat >/models/config_all.json <<EOF
-        {
-          "model_config_list": [
-            {
-              "config": {
-                "name": "${MODEL_NAME:-Phi-3.5-Vision}",
-                "source_model": "${OVMS_VLM_SOURCE_MODEL:-OpenVINO/Phi-3.5-vision-instruct-int4-ov}",
-                "target_device": "${OVMS_TARGET_DEVICE:-CPU}"
-              }
-            },
-            {
-              "config": {
-                "name": "${LOCAL_LLM_MODEL:-Phi-4-mini-instruct}",
-                "source_model": "${OVMS_LLM_SOURCE_MODEL:-OpenVINO/Phi-4-mini-instruct-int4-ov}",
-                "target_device": "${OVMS_TARGET_DEVICE:-CPU}"
-              }
-            }
-          ]
-        }
-        EOF
-        chown 5000:5000 /models/config_all.json
-        chmod 644 /models/config_all.json
+      - ./scripts/init_ovms.py:/init_ovms.py:ro
+    entrypoint: ["python3", "/init_ovms.py"]
+    networks:
+      - app_network
 
   ovms:
     image: openvino/model_server:2026.0
@@ -53,7 +33,7 @@ services:
     user: "5000:5000" 
     restart: unless-stopped
     depends_on:
-      ovms-config:
+      ovms-download:
         condition: service_completed_successfully
     ports:
       - "8000:8000"
@@ -64,36 +44,28 @@ services:
       - HTTP_PROXY=${http_proxy}
       - https_proxy=${https_proxy}
       - HTTPS_PROXY=${https_proxy}
-      - HF_TOKEN=${HF_TOKEN}
-      - OVMS_VLM_SOURCE_MODEL=${OVMS_VLM_SOURCE_MODEL:-OpenVINO/Phi-3.5-vision-instruct-int4-ov}
-      - OVMS_LLM_SOURCE_MODEL=${OVMS_LLM_SOURCE_MODEL:-OpenVINO/Phi-4-mini-instruct-int4-ov}
-      - OVMS_TARGET_DEVICE=${OVMS_TARGET_DEVICE:-CPU}
-      - MODEL_NAME=${MODEL_NAME:-Phi-3.5-Vision}
-      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-Phi-4-mini-instruct}
     volumes:
       - ovms-models:/models
+    ulimits:
+      nofile:
+        soft: 16384
+        hard: 65536
     command:
       - --rest_port
       - "8000"
-      - --source_model
-      - "${OVMS_SOURCE_MODEL:-OpenVINO/Phi-3.5-vision-instruct-int4-ov}"
-      - --model_repository_path
-      - "/models"
-      - --model_name
-      - "${MODEL_NAME:-Phi-3.5-Vision}"
-      - --task
-      - "text_generation"
-      - --pipeline_type
-      - "VLM"
+      - --config_path
+      - "/models/config_all.json"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/config"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 300s
+    networks:
+      - app_network
 
   live-video-alert-agent:
-    image: ${REGISTRY:-}live-video-alert:${TAG:-latest}
+    image: ${REGISTRY:-}live-video-alert-agent:${TAG:-latest}
     build: .
     container_name: live-video-alert-agent
     restart: unless-stopped
@@ -101,51 +73,32 @@ services:
       - "${PORT:-9000}:${PORT:-9000}"
     environment:
       # ---- proxy ----
-      - no_proxy=${no_proxy}
-      - NO_PROXY=${no_proxy}
+      - no_proxy=${no_proxy},ovms
       - http_proxy=${http_proxy}
-      - HTTP_PROXY=${http_proxy}
       - https_proxy=${https_proxy}
-      - HTTPS_PROXY=${https_proxy}
-
       # ---- core ----
-      - PORT=${PORT:-9000}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - RTSP_URL=${RTSP_URL}
 
       # ---- VLM / OVMS ----
       - VLM_URL=${VLM_URL:-http://ovms:8000/v3}
-      - VLM_API_KEY=${VLM_API_KEY:-}
-      - MODEL_NAME=${MODEL_NAME:-Phi-3.5-Vision}
+      - MODEL_NAME=${MODEL_NAME:-Phi-3.5-vision}
       - VLM_IMAGE_MAX_DIM=${VLM_IMAGE_MAX_DIM:-448}
       - VLM_JPEG_QUALITY=${VLM_JPEG_QUALITY:-70}
       - VLM_TIMEOUT=${VLM_TIMEOUT:-30}
-      - VLM_MAX_RETRIES=${VLM_MAX_RETRIES:-2}
-      - VLM_MAX_TOKENS=${VLM_MAX_TOKENS:-800}
+      - VLM_MAX_TOKENS=${VLM_MAX_TOKENS:-150}
 
       # ---- stream capture ----
-      - ANALYSIS_INTERVAL=${ANALYSIS_INTERVAL:-5}
-      - CAPTURE_FPS=${CAPTURE_FPS:-0}
+      - ANALYSIS_INTERVAL=${ANALYSIS_INTERVAL:-2}
+      - CAPTURE_FPS=${CAPTURE_FPS:-15}
       - CAPTURE_RESIZE_HEIGHT=${CAPTURE_RESIZE_HEIGHT:-720}
 
-      # ---- API auth (leave empty to disable) ----
-      - API_KEY=${API_KEY:-}
-
-      # ---- Google ADK (optional; USE_ADK takes precedence over USE_LOCAL_LLM) ----
+      # ---- ADK mode ----
       - USE_ADK=${USE_ADK:-true}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - ADK_MODEL=${ADK_MODEL:-gemini-2.0-flash-lite}
-      - ADK_USE_LOCAL_LLM=${ADK_USE_LOCAL_LLM:-true}
 
-      # ---- Local LLM (optional; defaults to OVMS text model endpoint) ----
-      - USE_LOCAL_LLM=${USE_LOCAL_LLM:-true}
+      # ---- Local LLM endpoint (used when USE_ADK=true without GEMINI_API_KEY) ----
       - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://ovms:8000/v3}
-      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-Phi-4-mini-instruct}
-      - LOCAL_LLM_API_KEY=${LOCAL_LLM_API_KEY:-local}
-      - LOCAL_LLM_TIMEOUT=${LOCAL_LLM_TIMEOUT:-30}
-
-      # ---- alert history ----
-      - ALERT_HISTORY_SIZE=${ALERT_HISTORY_SIZE:-500}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-Phi-4-mini-instruct-int4-ov}
 
       # ---- snapshot tool ----
       - SNAPSHOT_DIR=/app/snapshots
@@ -165,15 +118,90 @@ services:
       # ---- MQTT action tool (optional) ----
       - MQTT_BROKER=${MQTT_BROKER:-}
       - MQTT_PORT=${MQTT_PORT:-1883}
-      - MQTT_USER=${MQTT_USER:-}
+      - MQTT_USERNAME=${MQTT_USERNAME:-}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-}
       - MQTT_BASE_TOPIC=${MQTT_BASE_TOPIC:-alerts/live-video}
 
+      # ---- MCP (Model Context Protocol) servers ----
+      - MCP_ENABLED=${MCP_ENABLED:-true}
+      
     volumes:
-      - ./resources:/temp/resources
+      - ./resources:/app/resources
+      # Persist alert snapshots across container restarts
+      - snapshots:/app/snapshots
+      # MCP config can also be mounted separately for runtime updates
+      # - ./mcp_config:/app/mcp_config:ro
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${PORT:-9000}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Allow container to access MCP servers running on the host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       ovms:
         condition: service_healthy
+    networks:
+      - app_network
+
+  live-metrics-service:
+    image: intel/live-metrics-service:1.0.0
+    container_name: live-metrics-service
+    ports:
+      - "${METRICS_PORT:-9090}:9090"
+    restart: unless-stopped
+    environment:
+      - no_proxy=localhost,127.0.0.1,collector,${no_proxy}
+      - NO_PROXY=localhost,127.0.0.1,collector,${no_proxy}
+      - http_proxy=${http_proxy}
+      - HTTP_PROXY=${http_proxy}
+      - https_proxy=${https_proxy}
+      - HTTPS_PROXY=${https_proxy}
+      - METRICS_PORT=${METRICS_PORT:-9090}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - app_network
+
+  collector:
+    image: intel/vippet-collector:2026.0.0
+    container_name: collector
+    ports:
+      - "9273:9273"
+    privileged: true
+    devices:
+      - "/sys:/sys"
+      - "/dev:/dev"
+      - "/run:/run"
+      - "/proc:/proc"
+    pid: host
+    volumes:
+      - "./shared/collector-signals:/app/.collector-signals"
+      - "../live-metrics-service/telegraf.conf:/etc/telegraf/telegraf.conf:ro"
+    restart: on-failure:5
+    environment:
+      - http_proxy=${http_proxy}
+      - https_proxy=${https_proxy}
+      - no_proxy=localhost,127.0.0.1,${no_proxy}
+      - WEBSOCKET_URL=ws://live-metrics-service:${METRICS_PORT:-9090}/ws/collector
+    depends_on:
+      live-metrics-service:
+        condition: service_healthy
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
 
 volumes:
   ovms-models:
