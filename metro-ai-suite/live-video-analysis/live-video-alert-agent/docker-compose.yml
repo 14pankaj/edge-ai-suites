@@ -4,39 +4,40 @@
 name: ${PROJECT_NAME:-live-video-alert-agent}
 services:
   ovms-download:
-    image: python:3.12-slim
+    image: openvino/model_server:2026.1-gpu
     container_name: ovms-download
     user: "0:0"
     environment:
       - HF_TOKEN=${HF_TOKEN}
+      - USE_ADK=${USE_ADK:-true}
       - http_proxy=${http_proxy}
       - HTTP_PROXY=${http_proxy}
       - https_proxy=${https_proxy}
       - HTTPS_PROXY=${https_proxy}
       - no_proxy=${no_proxy}
       - NO_PROXY=${no_proxy}
-      - VLM_NAME=${MODEL_NAME:-Phi-3.5-Vision}
-      - VLM_REPO=${OVMS_VLM_SOURCE_MODEL:-OpenVINO/Phi-3.5-vision-instruct-int4-ov}
-      - LLM_NAME=${LOCAL_LLM_MODEL:-Phi-4-mini-instruct-int4-ov}
+      - VLM_NAME=${MODEL_NAME:-Phi-3.5-vision}
+      - VLM_REPO=${OVMS_SOURCE_MODEL:-OpenVINO/Phi-3.5-vision-instruct-int4-ov}
+      - LLM_NAME=${LLM_MODEL:-Phi-4-mini-instruct-int4-ov}
       - LLM_REPO=${OVMS_LLM_SOURCE_MODEL:-OpenVINO/Phi-4-mini-instruct-int4-ov}
-      - TARGET_DEVICE=${OVMS_TARGET_DEVICE:-CPU}
+      - VLM_TARGET_DEVICE=${VLM_TARGET_DEVICE:-${OVMS_TARGET_DEVICE:-CPU}}
+      - LLM_TARGET_DEVICE=${LLM_TARGET_DEVICE:-${OVMS_TARGET_DEVICE:-CPU}}
     volumes:
       - ovms-models:/models
-      - ./scripts/init_ovms.py:/init_ovms.py:ro
-    entrypoint: ["python3", "/init_ovms.py"]
+      - ./scripts/init_ovms.sh:/init_ovms.sh:ro
+    entrypoint: ["/bin/bash", "/init_ovms.sh"]
     networks:
       - app_network
 
-  ovms:
-    image: openvino/model_server:2026.0
+  ovms-vlm:
+    image: openvino/model_server:2026.1-gpu
     container_name: ovms-vlm
-    user: "5000:5000" 
     restart: unless-stopped
     depends_on:
       ovms-download:
         condition: service_completed_successfully
     ports:
-      - "8000:8000"
+      - "${VLM_PORT:-8000}:8000"
     environment:
       - no_proxy=${no_proxy},localhost
       - NO_PROXY=${no_proxy},localhost
@@ -54,7 +55,53 @@ services:
       - --rest_port
       - "8000"
       - --config_path
-      - "/models/config_all.json"
+      - "/models/config_vlm.json"
+    devices:
+      - "/dev/dri:/dev/dri"
+    group_add:
+      - ${RENDER_DEVICE_GID:-992}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/config"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    networks:
+      - app_network
+
+  ovms-llm:
+    image: openvino/model_server:2026.1-gpu
+    container_name: ovms-llm
+    profiles:
+      - adk-llm
+    restart: unless-stopped
+    depends_on:
+      ovms-download:
+        condition: service_completed_successfully
+    ports:
+      - "${LLM_PORT:-8001}:8000"
+    environment:
+      - no_proxy=${no_proxy},localhost
+      - NO_PROXY=${no_proxy},localhost
+      - http_proxy=${http_proxy}
+      - HTTP_PROXY=${http_proxy}
+      - https_proxy=${https_proxy}
+      - HTTPS_PROXY=${https_proxy}
+    volumes:
+      - ovms-models:/models
+    ulimits:
+      nofile:
+        soft: 16384
+        hard: 65536
+    command:
+      - --rest_port
+      - "8000"
+      - --config_path
+      - "/models/config_llm.json"
+    devices:
+      - "/dev/dri:/dev/dri"
+    group_add:
+      - ${RENDER_DEVICE_GID:-992}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/config"]
       interval: 10s
@@ -73,64 +120,37 @@ services:
       - "${PORT:-9000}:${PORT:-9000}"
     environment:
       # ---- proxy ----
-      - no_proxy=${no_proxy},ovms
+      - no_proxy=${no_proxy},ovms-vlm,ovms-llm
       - http_proxy=${http_proxy}
       - https_proxy=${https_proxy}
-      # ---- core ----
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - RTSP_URL=${RTSP_URL}
-
       # ---- VLM / OVMS ----
-      - VLM_URL=${VLM_URL:-http://ovms:8000/v3}
       - MODEL_NAME=${MODEL_NAME:-Phi-3.5-vision}
-      - VLM_IMAGE_MAX_DIM=${VLM_IMAGE_MAX_DIM:-448}
-      - VLM_JPEG_QUALITY=${VLM_JPEG_QUALITY:-70}
-      - VLM_TIMEOUT=${VLM_TIMEOUT:-30}
-      - VLM_MAX_TOKENS=${VLM_MAX_TOKENS:-150}
-
       # ---- stream capture ----
-      - ANALYSIS_INTERVAL=${ANALYSIS_INTERVAL:-2}
-      - CAPTURE_FPS=${CAPTURE_FPS:-15}
-      - CAPTURE_RESIZE_HEIGHT=${CAPTURE_RESIZE_HEIGHT:-720}
-
+      - CAPTURE_FPS=${CAPTURE_FPS:-10}
       # ---- ADK mode ----
       - USE_ADK=${USE_ADK:-true}
-
-      # ---- Local LLM endpoint (used when USE_ADK=true without GEMINI_API_KEY) ----
-      - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://ovms:8000/v3}
-      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-Phi-4-mini-instruct-int4-ov}
-
+      # ---- LLM endpoint ----
+      - LLM_MODEL=${LLM_MODEL:-Phi-4-mini-instruct-int4-ov}
       # ---- snapshot tool ----
       - SNAPSHOT_DIR=/app/snapshots
-
-      # ---- email action tool (optional) ----
-      - SMTP_HOST=${SMTP_HOST:-}
-      - SMTP_PORT=${SMTP_PORT:-587}
-      - SMTP_USER=${SMTP_USER:-}
-      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
-      - ALERT_EMAIL_FROM=${ALERT_EMAIL_FROM:-}
-      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO:-}
-
       # ---- webhook action tool (optional) ----
       - WEBHOOK_URL=${WEBHOOK_URL:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
-
       # ---- MQTT action tool (optional) ----
       - MQTT_BROKER=${MQTT_BROKER:-}
       - MQTT_PORT=${MQTT_PORT:-1883}
       - MQTT_USERNAME=${MQTT_USERNAME:-}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-}
       - MQTT_BASE_TOPIC=${MQTT_BASE_TOPIC:-alerts/live-video}
-
       # ---- MCP (Model Context Protocol) servers ----
       - MCP_ENABLED=${MCP_ENABLED:-true}
       
     volumes:
       - ./resources:/app/resources
-      # Persist alert snapshots across container restarts
+      - ./src/config.py:/app/src/config.py:ro
       - snapshots:/app/snapshots
-      # MCP config can also be mounted separately for runtime updates
-      # - ./mcp_config:/app/mcp_config:ro
 
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:${PORT:-9000}/health"]
@@ -142,8 +162,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      ovms:
+      ovms-vlm:
         condition: service_healthy
+      ovms-llm:
+        condition: service_healthy
+        required: ${USE_ADK:-true}
     networks:
       - app_network
 

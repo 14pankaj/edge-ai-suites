@@ -39,19 +39,24 @@ def unregister_frame_callback(stream_id: str):
 async def capture_snapshot(
     stream_id: str,
     alert_name: str = "alert",
-    severity: str = "medium",
+    frame=None,
 ) -> dict:
-    """Save the current frame from stream_id as a JPEG snapshot to disk."""
-    callback = _frame_callbacks.get(stream_id)
-    if callback is None:
-        logger.warning(f"capture_snapshot: no frame callback for stream '{stream_id}'")
-        return {"status": "skipped", "reason": "no frame callback registered"}
+    """Save a frame as a JPEG snapshot to disk.
 
-    try:
-        frame = callback(stream_id)
-    except Exception as exc:
-        logger.error(f"capture_snapshot: frame callback error: {exc}")
-        return {"status": "error", "reason": str(exc)}
+    If *frame* is provided it is used directly (pinned-frame mode).
+    Otherwise the latest frame is fetched via the registered callback.
+    """
+    if frame is None:
+        callback = _frame_callbacks.get(stream_id)
+        if callback is None:
+            logger.warning(f"capture_snapshot: no frame callback for stream '{stream_id}'")
+            return {"status": "skipped", "reason": "no frame callback registered"}
+
+        try:
+            frame = callback(stream_id)
+        except Exception as exc:
+            logger.error(f"capture_snapshot: frame callback error: {exc}")
+            return {"status": "error", "reason": str(exc)}
 
     if frame is None:
         return {"status": "skipped", "reason": "no frame available"}
@@ -61,7 +66,7 @@ async def capture_snapshot(
     safe_stream = stream_id.replace("/", "_").replace(":", "_")
     out_dir = os.path.join(settings.SNAPSHOT_DIR, safe_stream)
     os.makedirs(out_dir, exist_ok=True)
-    filename = f"{safe_alert}_{severity}_{ts}.jpg"
+    filename = f"{safe_alert}_{ts}.jpg"
     path = os.path.join(out_dir, filename)
 
     def _write() -> bool:

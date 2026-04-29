@@ -50,28 +50,21 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
 
    **Agentic dispatch — choose one mode:**
 
-   *Option A — Google ADK with local OVMS (fully offline):*
+   *Option A — Google ADK with local OVMS (default, fully offline):*
    ```bash
-   export USE_ADK=true
-   export LOCAL_LLM_URL=http://ovms:8000/v3
-   export LOCAL_LLM_MODEL=Phi-4-mini-instruct
+   export USE_ADK=true   # this is the default
+   export COMPOSE_PROFILES=$([[ "${USE_ADK}" == "true" ]] && echo "adk-llm" || echo "") #So if USE_ADK changes this env get updated as well
+   export LLM_URL=http://ovms-llm:8000/v3
+   export LLM_MODEL=Phi-4-mini-instruct-int4-ov
    ```
 
-   *Option B — Rule-based (default, no LLM needed):*
+   *Option B — Rule-based (no LLM needed):*
    ```bash
-   # No extra variables required
+   export USE_ADK=false
    ```
 
    **Action tools** (configure the ones you want active):
    ```bash
-   # Email notifications
-   export SMTP_HOST=smtp.example.com
-   export SMTP_PORT=587
-   export SMTP_USER=alerts@example.com
-   export SMTP_PASSWORD=<password>
-   export SMTP_FROM=alerts@example.com
-   export SMTP_ALERT_RECIPIENT=oncall@example.com
-
    # Webhook (receives HMAC-signed POST)
    export WEBHOOK_URL=https://hooks.example.com/alert
    export WEBHOOK_SECRET=<hmac-secret>          # optional
@@ -79,8 +72,17 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
    # MQTT
    export MQTT_BROKER=192.168.1.20
    export MQTT_PORT=1883
+   export MQTT_USERNAME=<username>              # optional
+   export MQTT_PASSWORD=<password>              # optional
    export MQTT_BASE_TOPIC=alerts/live-video
    ```
+
+   **MCP (Model Context Protocol) — optional external tool servers:**
+   ```bash
+   export MCP_ENABLED=true                      # default: true
+   export MCP_CONFIG_FILE=resources/mcp_servers.json  # path to MCP server config
+   ```
+   Configure MCP servers in `resources/mcp_servers.json`. See [API Reference](./api-reference.md#mcp) for details.
 
 5. **Start the Application**:
    Run the following command from the project root:
@@ -125,7 +127,7 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
    - Click **Create New Alert**
    - Enter an **Alert Name** (e.g., "Fire Detection")
    - Write a **Prompt** describing the condition (e.g., "Is there fire or smoke?")
-   - Set **Severity**, **Cooldown**, and the **Tools** to invoke on detection
+   - Set the **Tools** to invoke on detection
 2. Click **Save** to activate
 
    Alternatively, configure alerts via the REST API:
@@ -138,8 +140,7 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
          "prompt": "Is there fire or smoke visible?",
          "enabled": true,
          "severity": "critical",
-         "cooldown_seconds": 60,
-         "tools": ["log_alert", "capture_snapshot", "send_email"],
+         "tools": ["log_alert", "capture_snapshot"],
          "escalation": {
            "threshold_consecutive": 3,
            "additional_tools": ["trigger_webhook", "publish_mqtt"]
@@ -165,9 +166,6 @@ curl http://localhost:9000/ready
 
 # System + per-stream metrics
 curl http://localhost:9000/metrics
-
-# Query last 20 critical alert events
-curl "http://localhost:9000/alerts/history?severity=critical&limit=20"
 
 # List configured action tools
 curl http://localhost:9000/tools

@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class StreamAddRequest(BaseModel):
-    id: Optional[str] = Field(
+    stream_id: Optional[str] = Field(
         default=None,
         max_length=64,
         description="Stream ID (auto-generated UUID if omitted)",
@@ -36,7 +36,7 @@ class StreamAddRequest(BaseModel):
         description="Alert names to evaluate for this stream (empty = all enabled alerts)",
     )
 
-    @field_validator("id")
+    @field_validator("stream_id")
     @classmethod
     def id_safe(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not re.match(r"^[a-zA-Z0-9_\-]+$", v):
@@ -44,8 +44,8 @@ class StreamAddRequest(BaseModel):
         return v
 
     def resolve_id(self) -> str:
-        """Return the explicit id or generate a short UUID."""
-        return self.id if self.id else uuid.uuid4().hex[:12]
+        """Return the explicit stream_id or generate a short UUID."""
+        return self.stream_id if self.stream_id else uuid.uuid4().hex[:12]
 
     @field_validator("url")
     @classmethod
@@ -58,11 +58,11 @@ class StreamAddRequest(BaseModel):
 
 class StreamResponse(BaseModel):
     status: Literal["added", "removed"]
-    id: str
+    stream_id: str
 
 
 class StreamStatus(BaseModel):
-    id: str
+    stream_id: str
     name: str = ""
     url: str
     connected: bool
@@ -120,7 +120,6 @@ class ToolInvokeResponse(BaseModel):
 class AlertHistoryQuery(BaseModel):
     stream_id: Optional[str] = None
     alert_name: Optional[str] = None
-    severity: Optional[str] = None
     answer: Optional[Literal["YES", "NO"]] = None
     limit: int = Field(default=50, ge=1, le=500)
 

@@ -26,7 +26,6 @@ dependencies = [
 
     # Action tools
     "aiohttp>=3.9.0",       # webhook tool
-    "aiosmtplib>=3.0.0",    # email tool
     "paho-mqtt>=2.0.0",     # MQTT tool
 
     # System metrics

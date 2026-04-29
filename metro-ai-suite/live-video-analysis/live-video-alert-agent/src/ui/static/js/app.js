@@ -8,7 +8,7 @@ const streamCount = document.getElementById('stream-count');
 let activeStreams = [];
 let streamMetadata = {};
 let cardStates = {};
-let agentConfig = [];
+let alertConfig = [];
 let resultsCache = {};
 let availableTools = [];
 
@@ -45,7 +45,7 @@ function showToast(message, type = 'info') {
 
 document.addEventListener('DOMContentLoaded', async () => {
     await loadAvailableTools();
-    await loadAgentConfig();
+    await loadAlertConfig();
     await loadStreams();
 
     initSSE();
@@ -167,8 +167,8 @@ function updateStreamResult(streamId, results) {
     const resultDiv = document.getElementById(`result-${safeId}`);
     if (!resultDiv) return;
     
-    const selectedAgent = cardStates[streamId];
-    renderResultDiv(resultDiv, selectedAgent, results);
+    const selectedAlert = cardStates[streamId];
+    renderResultDiv(resultDiv, selectedAlert, results);
 }
 
 function refreshAllResults() {
@@ -177,9 +177,9 @@ function refreshAllResults() {
         const resultDiv = document.getElementById(`result-${safeId}`);
         if (!resultDiv) return;
         
-        const selectedAgent = cardStates[id];
+        const selectedAlert = cardStates[id];
         const cachedData = resultsCache[id];
-        renderResultDiv(resultDiv, selectedAgent, cachedData);
+        renderResultDiv(resultDiv, selectedAlert, cachedData);
     });
 }
 
@@ -194,35 +194,40 @@ function updateAllResults(allResults) {
     });
 }
 
-function renderResultDiv(resultDiv, selectedAgent, streamData) {
+function renderResultDiv(resultDiv, selectedAlert, streamData) {
     if (!streamData) {
         resultDiv.innerHTML = '<p class="text-xs text-gray-400 italic">Waiting for analysis...</p>';
         return;
     }
     
-    const enabledAgentNames = agentConfig.filter(a => a.enabled).map(a => a.name);
+    const enabledAlertNames = alertConfig.filter(a => a.enabled).map(a => a.name);
     
-    if (selectedAgent === '__ALL__') {
-        if (enabledAgentNames.length === 0) {
+    const MAX_VISIBLE_ALERTS = 4;
+
+    if (selectedAlert === '__ALL__') {
+        if (enabledAlertNames.length === 0) {
             resultDiv.innerHTML = '<p class="text-xs text-gray-400 italic">No alerts enabled</p>';
             return;
         }
         let allHtml = '';
-        enabledAgentNames.forEach(agentName => {
-            const result = streamData[agentName];
+        let count = 0;
+        enabledAlertNames.forEach(alertName => {
+            if (count >= MAX_VISIBLE_ALERTS) return;
+            const result = streamData[alertName];
             if (result && result.answer) {
-                allHtml += renderResultCard(result, agentName);
+                allHtml += renderResultCard(result, alertName);
+                count++;
             }
         });
         resultDiv.innerHTML = allHtml || '<p class="text-xs text-gray-400 italic">Waiting for analysis...</p>';
-    } else if (selectedAgent && streamData[selectedAgent] && enabledAgentNames.includes(selectedAgent)) {
-        resultDiv.innerHTML = renderResultCard(streamData[selectedAgent], selectedAgent);
+    } else if (selectedAlert && streamData[selectedAlert] && enabledAlertNames.includes(selectedAlert)) {
+        resultDiv.innerHTML = renderResultCard(streamData[selectedAlert], selectedAlert);
     } else {
         resultDiv.innerHTML = '<p class="text-xs text-gray-400 italic">Waiting for analysis...</p>';
     }
 }
 
-function renderResultCard(result, agentName) {
+function renderResultCard(result, alertName) {
     const isYes = result.answer === 'YES';
     const bgClass = isYes ? 'bg-red-50 border-red-300' : 'bg-green-50 border-green-300';
     const textClass = isYes ? 'text-red-800' : 'text-green-800';
@@ -233,7 +238,7 @@ function renderResultCard(result, agentName) {
         <div class="rounded border p-2 ${bgClass} transition-colors duration-300">
             <div class="flex justify-between items-center mb-1">
                 <span class="font-bold text-xs uppercase ${textClass}">${icon} ${result.answer}</span>
-                <span class="text-[10px] px-1.5 py-0.5 rounded font-medium ${badgeClass}">${escapeHtml(agentName)}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded font-medium ${badgeClass}">${escapeHtml(alertName)}</span>
             </div>
             <p class="text-xs ${textClass} opacity-80 leading-tight">${escapeHtml(result.reason || 'No details')}</p>
         </div>
@@ -268,24 +273,24 @@ function initResizer() {
     });
 }
 
-async function loadAgentConfig() {
+async function loadAlertConfig() {
     try {
         const res = await fetch('/config/alerts');
-        agentConfig = await res.json();
-        renderAgentConfig();
+        alertConfig = await res.json();
+        renderAlertConfig();
     } catch(e) { 
-        console.error("Failed to load agent config:", e);
-        agentConfig = [];
-        renderAgentConfig();
+        console.error("Failed to load alert config:", e);
+        alertConfig = [];
+        renderAlertConfig();
     }
 }
 
-function renderAgentConfig() {
-    const container = document.getElementById('agents-container');
-    const addBtn = document.getElementById('add-agent-btn');
+function renderAlertConfig() {
+    const container = document.getElementById('alerts-container');
+    const addBtn = document.getElementById('add-alert-btn');
     container.innerHTML = '';
     
-    agentConfig.forEach((agent, index) => {
+    alertConfig.forEach((alertEntry, index) => {
         const card = document.createElement('div');
         card.className = "bg-white border border-slate-200 rounded-lg p-3 shadow-sm hover:shadow-md transition-all group relative";
         card.innerHTML = `
@@ -293,11 +298,11 @@ function renderAgentConfig() {
                 <div class="flex items-center gap-2">
                      <input type="checkbox" 
                        class="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-offset-0 focus:ring-1 focus:ring-blue-500 cursor-pointer" 
-                       ${agent.enabled ? 'checked' : ''} 
-                       onchange="toggleAgent(${index}, this.checked)">
+                       ${alertEntry.enabled ? 'checked' : ''} 
+                       onchange="toggleAlert(${index}, this.checked)">
                      <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Alert ${index + 1}</span>
                 </div>
-                <button onclick="removeAgent(${index})" class="text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100" title="Remove Alert">
+                <button onclick="removeAlert(${index})" class="text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100" title="Remove Alert">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
@@ -305,70 +310,70 @@ function renderAgentConfig() {
             </div>
             <div class="space-y-2">
                 <input type="text" 
-                       value="${escapeHtml(agent.name)}" 
+                       value="${escapeHtml(alertEntry.name)}" 
                        class="w-full text-xs font-semibold text-slate-700 bg-slate-100 border-0 rounded px-2.5 py-1.5 focus:bg-white focus:ring-2 focus:ring-blue-500/20 placeholder:text-slate-400 transition-all outline-none"
                        placeholder="Alert Name"
-                       onchange="updateAgentName(${index}, this.value)">
+                       onchange="updateAlertName(${index}, this.value)">
                 <textarea class="w-full text-[11px] text-slate-600 bg-slate-100 border-0 rounded px-2.5 py-1.5 resize-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 placeholder:text-slate-400 transition-all outline-none leading-relaxed" 
                           rows="2" 
                           placeholder="Describe visual condition (e.g., Is there fire?)"
-                          onchange="updateAgentPrompt(${index}, this.value)">${escapeHtml(agent.prompt)}</textarea>
+                          onchange="updateAlertPrompt(${index}, this.value)">${escapeHtml(alertEntry.prompt)}</textarea>
             </div>
         `;
         container.appendChild(card);
     });
     
-    addBtn.style.display = agentConfig.length >= 4 ? 'none' : 'flex';
+    addBtn.style.display = alertConfig.length >= 4 ? 'none' : 'flex';
     
     updateAllDropdowns();
     refreshAllResults();
 }
 
-function addAgent() {
-    if (agentConfig.length >= 4) return;
+function addAlert() {
+    if (alertConfig.length >= 4) return;
     let num = 1;
-    while (agentConfig.some(a => a.name === `Alert ${num}`)) {
+    while (alertConfig.some(a => a.name === `Alert ${num}`)) {
         num++;
     }
-    agentConfig.push({
+    alertConfig.push({
         name: `Alert ${num}`,
         prompt: "",
         enabled: true,
         tools: ["log_alert", "capture_snapshot"]
     });
-    renderAgentConfig();
+    renderAlertConfig();
 }
 
-function removeAgent(index) {
-    const name = agentConfig[index]?.name || `Alert ${index + 1}`;
-    agentConfig.splice(index, 1);
-    renderAgentConfig();
+function removeAlert(index) {
+    const name = alertConfig[index]?.name || `Alert ${index + 1}`;
+    alertConfig.splice(index, 1);
+    renderAlertConfig();
     showToast(`Removed ${name}`, "info");
 }
 
-function toggleAgent(index, enabled) {
-    agentConfig[index].enabled = enabled;
+function toggleAlert(index, enabled) {
+    alertConfig[index].enabled = enabled;
     updateAllDropdowns();
     refreshAllResults();
 }
 
-function updateAgentName(index, name) {
-    agentConfig[index].name = name;
+function updateAlertName(index, name) {
+    alertConfig[index].name = name;
     updateAllDropdowns();
 }
 
-function updateAgentPrompt(index, prompt) {
-    agentConfig[index].prompt = prompt;
+function updateAlertPrompt(index, prompt) {
+    alertConfig[index].prompt = prompt;
 }
 
-async function saveAgents() {
-    const valid = agentConfig.every(a => a.name.trim() && a.prompt.trim());
-    if (!valid && agentConfig.length > 0) {
+async function saveAlerts() {
+    const valid = alertConfig.every(a => a.name.trim() && a.prompt.trim());
+    if (!valid && alertConfig.length > 0) {
         showToast("Please fill in all alert names and prompts", "error");
         return;
     }
     
-    const names = agentConfig.map(a => a.name.trim().toLowerCase());
+    const names = alertConfig.map(a => a.name.trim().toLowerCase());
     if (new Set(names).size !== names.length) {
         showToast("Alert names must be unique", "error");
         return;
@@ -378,7 +383,7 @@ async function saveAgents() {
         const res = await fetch('/config/alerts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(agentConfig)
+            body: JSON.stringify(alertConfig)
         });
         if (res.ok) {
             showToast("Alerts saved!", "success");
@@ -392,10 +397,10 @@ async function saveAgents() {
 }
 
 function updateAllDropdowns() {
-    const enabledAgents = agentConfig.filter(a => a.enabled);
+    const enabledAlerts = alertConfig.filter(a => a.enabled);
     let optionsHtml = '<option value="__ALL__">All Alerts</option>';
-    optionsHtml += enabledAgents.length > 0
-        ? enabledAgents.map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join('')
+    optionsHtml += enabledAlerts.length > 0
+        ? enabledAlerts.map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join('')
         : '';
     
     activeStreams.forEach(id => {
@@ -407,7 +412,7 @@ function updateAllDropdowns() {
             if (currentVal === '__ALL__') {
                 select.value = '__ALL__';
                 cardStates[id] = '__ALL__';
-            } else if (enabledAgents.some(a => a.name === currentVal)) {
+            } else if (enabledAlerts.some(a => a.name === currentVal)) {
                 select.value = currentVal;
             } else {
                 select.value = '__ALL__';
@@ -417,7 +422,6 @@ function updateAllDropdowns() {
     });
 }
 
-// ============== TOOL SELECTION FOR STREAMS ==============
 
 async function loadAvailableTools() {
     try {
@@ -465,15 +469,15 @@ async function loadStreams() {
         const res = await fetch('/streams');
         const data = await res.json();
         const streams = data.streams || [];
-        // Backend returns objects {id, url, tools, alerts, ...}; extract IDs for rendering
-        activeStreams = streams.map(s => typeof s === 'string' ? s : s.id);
+        // Backend returns objects {stream_id, name, url, tools, alerts, ...}; extract IDs for rendering
+        activeStreams = streams.map(s => typeof s === 'string' ? s : s.stream_id);
         streamMetadata = {};
         streams.forEach(s => {
             if (typeof s === 'object') {
-                streamMetadata[s.id] = s;
+                streamMetadata[s.stream_id] = s;
                 // Restore per-stream alert selection from persisted backend state
                 const a = s.alerts;
-                cardStates[s.id] = (a && a.length === 1) ? a[0] : '__ALL__';
+                cardStates[s.stream_id] = (a && a.length === 1) ? a[0] : '__ALL__';
             }
         });
         streamCount.textContent = activeStreams.length;
@@ -583,9 +587,9 @@ async function addNewStream() {
     }
 }
 
-function updateCardAgent(streamId, agentName) {
-    cardStates[streamId] = agentName;
-    const alerts = agentName === '__ALL__' ? [] : [agentName];
+function updateCardAlert(streamId, alertName) {
+    cardStates[streamId] = alertName;
+    const alerts = alertName === '__ALL__' ? [] : [alertName];
     fetch(`/streams/${encodeURIComponent(streamId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -614,11 +618,11 @@ function renderGrid() {
         return;
     }
 
-    // Get enabled agents for dropdown
-    const enabledAgents = agentConfig.filter(a => a.enabled);
+    // Get enabled alerts for dropdown
+    const enabledAlerts = alertConfig.filter(a => a.enabled);
 
     activeStreams.forEach(id => {
-        // Default state - default to "All Agents"
+        // Default state - default to "All Alerts"
         if (!cardStates[id]) {
             cardStates[id] = '__ALL__';
         }
@@ -647,27 +651,27 @@ function renderGrid() {
         img.alt = id;
         videoWrapper.appendChild(img);
 
-        // Control Bar (Agent Selector)
+        // Control Bar (Alert Selector)
         const controlBar = document.createElement('div');
         controlBar.className = "px-2 py-2 bg-gray-50 border-b border-gray-100 flex items-center";
         const select = document.createElement('select');
         select.className = "w-full text-xs p-1 border border-gray-300 rounded bg-white focus:outline-none";
         
-        // Build dropdown options from dynamic agents
+        // Build dropdown options from enabled alerts
         let selectOptions = '<option value="__ALL__">All Alerts</option>';
-        if (enabledAgents.length > 0) {
-            selectOptions += enabledAgents.map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join('');
+        if (enabledAlerts.length > 0) {
+            selectOptions += enabledAlerts.map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join('');
         }
         select.innerHTML = selectOptions;
         
         if (cardStates[id]) select.value = cardStates[id];
-        select.onchange = (e) => updateCardAgent(id, e.target.value);
+        select.onchange = (e) => updateCardAlert(id, e.target.value);
         controlBar.appendChild(select);
 
         // Results Area
         const stats = document.createElement('div');
         stats.id = `result-${safeId}`;
-        stats.className = "flex-1 overflow-y-auto p-2 bg-white flex flex-col gap-2 min-h-[100px]";
+        stats.className = "flex-1 overflow-y-auto p-2 bg-white flex flex-col gap-1 min-h-[80px] max-h-[220px]";
         stats.innerHTML = '<p class="text-xs text-gray-400 italic">Waiting for analysis...</p>';
 
         card.appendChild(header);
@@ -691,9 +695,9 @@ async function fetchData() {
             const resultDiv = document.getElementById(`result-${safeId}`);
             if (!resultDiv) return;
             
-            const selectedAgent = cardStates[id];
+            const selectedAlert = cardStates[id];
             const streamData = json[id];
-            renderResultDiv(resultDiv, selectedAgent, streamData);
+            renderResultDiv(resultDiv, selectedAlert, streamData);
         });
 
     } catch (e) {
@@ -705,51 +709,107 @@ async function fetchData() {
 // ============== SYSTEM METRICS (WebSocket from live-metrics-service) ==============
 let metricsWs = null;
 let metricsReconnectTimer = null;
-let cpuChart, gpuChart, memChart;
+let systemChart = null;
 
 // Track GPU engine metrics for aggregation
 const gpuEngineUsages = [];
 
 const MAX_DATA_POINTS = 60;
 
-function createChart(canvasId, label, color) {
+// Dataset indices in the combined chart
+const DS_CPU = 0;
+const DS_GPU = 1;
+const DS_MEM = 2;
+
+function createCombinedChart(canvasId) {
     const ctx = document.getElementById(canvasId)?.getContext('2d');
     if (!ctx || typeof Chart === 'undefined') return null;
 
-    const gradient = ctx.createLinearGradient(0, 0, 0, 128);
-    gradient.addColorStop(0, `${color}55`);
-    gradient.addColorStop(1, `${color}0f`);
+    function makeGradient(color) {
+        const g = ctx.createLinearGradient(0, 0, 0, 200);
+        g.addColorStop(0, `${color}30`);
+        g.addColorStop(1, `${color}05`);
+        return g;
+    }
 
     return new Chart(ctx, {
         type: 'line',
         data: {
             labels: [],
-            datasets: [{
-                label: label,
-                data: [],
-                borderColor: color,
-                backgroundColor: gradient,
-                borderWidth: 2,
-                fill: true,
-                tension: 0.35,
-                pointRadius: 0,
-                pointHoverRadius: 3
-            }]
+            datasets: [
+                {
+                    label: 'CPU %',
+                    data: [],
+                    borderColor: '#3b82f6',
+                    backgroundColor: makeGradient('#3b82f6'),
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 0,
+                    pointHoverRadius: 3
+                },
+                {
+                    label: 'GPU %',
+                    data: [],
+                    borderColor: '#10b981',
+                    backgroundColor: makeGradient('#10b981'),
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 0,
+                    pointHoverRadius: 3
+                },
+                {
+                    label: 'Memory %',
+                    data: [],
+                    borderColor: '#a855f7',
+                    backgroundColor: makeGradient('#a855f7'),
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 0,
+                    pointHoverRadius: 3
+                }
+            ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             animation: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
             plugins: {
-                legend: { display: false },
-                tooltip: { enabled: true }
+                legend: {
+                    display: true,
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        pointStyle: 'circle',
+                        boxWidth: 6,
+                        boxHeight: 6,
+                        padding: 16,
+                        font: { size: 11 },
+                        color: '#64748b'
+                    }
+                },
+                tooltip: {
+                    enabled: true,
+                    callbacks: {
+                        label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`
+                    }
+                }
             },
             scales: {
                 y: {
                     suggestedMin: 0,
                     suggestedMax: 100,
                     grid: { color: '#e2e8f0' },
-                    ticks: { color: '#94a3b8' }
+                    ticks: {
+                        color: '#94a3b8',
+                        callback: (v) => v + '%'
+                    }
                 },
                 x: { display: false }
             }
@@ -758,20 +818,24 @@ function createChart(canvasId, label, color) {
 }
 
 function initMetricsCharts() {
-    cpuChart = createChart('cpu-chart', 'CPU %', '#3b82f6');
-    gpuChart = createChart('gpu-chart', 'GPU %', '#10b981');
-    memChart = createChart('mem-chart', 'Memory %', '#a855f7');
+    systemChart = createCombinedChart('system-chart');
 }
 
-function pushStatSample(chart, value) {
-    if (!chart) return;
-    const labels = chart.data.labels;
+function pushCombinedSample(cpuVal, gpuVal, memVal) {
+    if (!systemChart) return;
+    const labels = systemChart.data.labels;
     labels.push(new Date().toLocaleTimeString());
     if (labels.length > MAX_DATA_POINTS) labels.shift();
-    const ds = chart.data.datasets[0];
-    ds.data.push(value);
-    if (ds.data.length > MAX_DATA_POINTS) ds.data.shift();
-    chart.update('none');
+
+    const datasets = systemChart.data.datasets;
+    datasets[DS_CPU].data.push(cpuVal ?? null);
+    datasets[DS_GPU].data.push(gpuVal ?? null);
+    datasets[DS_MEM].data.push(memVal ?? null);
+
+    for (const ds of datasets) {
+        if (ds.data.length > MAX_DATA_POINTS) ds.data.shift();
+    }
+    systemChart.update('none');
 }
 
 function initMetricsWebSocket() {
@@ -836,6 +900,10 @@ function processMetrics(metrics) {
     // Reset GPU engine tracking
     gpuEngineUsages.length = 0;
 
+    let cpuVal = null;
+    let gpuVal = null;
+    let memVal = null;
+
     metrics.forEach(metric => {
         switch (metric.name) {
             case 'cpu':
@@ -843,9 +911,9 @@ function processMetrics(metrics) {
                     ? parseFloat((100 - metric.fields.usage_idle).toFixed(1))
                     : null;
                 if (cpuUsage != null) {
-                    const cpuVal = document.getElementById('metrics-cpu-val');
-                    if (cpuVal) cpuVal.textContent = cpuUsage.toFixed(1) + '%';
-                    pushStatSample(cpuChart, cpuUsage);
+                    cpuVal = cpuUsage;
+                    const cpuEl = document.getElementById('metrics-cpu-val');
+                    if (cpuEl) cpuEl.textContent = cpuUsage.toFixed(1) + '%';
                     // Sidebar
                     const sidebarCpuVal = document.getElementById('cpu-val');
                     const sidebarCpuBar = document.getElementById('cpu-bar');
@@ -865,21 +933,21 @@ function processMetrics(metrics) {
                 // NVIDIA GPU or generic GPU metrics
                 const gpuUsage = metric.fields?.utilization_gpu || metric.fields?.usage_percent || 0;
                 if (gpuUsage != null) {
-                    const gpuVal = document.getElementById('metrics-gpu-val');
-                    if (gpuVal) gpuVal.textContent = parseFloat(gpuUsage).toFixed(1) + '%';
-                    pushStatSample(gpuChart, parseFloat(gpuUsage));
+                    gpuVal = parseFloat(gpuUsage);
+                    const gpuEl = document.getElementById('metrics-gpu-val');
+                    if (gpuEl) gpuEl.textContent = gpuVal.toFixed(1) + '%';
                 }
                 break;
             case 'mem':
                 const memPercent = metric.fields?.used_percent;
                 if (memPercent != null) {
-                    const memVal = document.getElementById('metrics-mem-val');
-                    if (memVal) memVal.textContent = parseFloat(memPercent).toFixed(1) + '%';
-                    pushStatSample(memChart, parseFloat(memPercent));
+                    memVal = parseFloat(memPercent);
+                    const memEl = document.getElementById('metrics-mem-val');
+                    if (memEl) memEl.textContent = memVal.toFixed(1) + '%';
                     // Sidebar
                     const sidebarMemVal = document.getElementById('mem-val');
                     const sidebarMemBar = document.getElementById('mem-bar');
-                    if (sidebarMemVal) sidebarMemVal.textContent = parseFloat(memPercent).toFixed(1) + '%';
+                    if (sidebarMemVal) sidebarMemVal.textContent = memVal.toFixed(1) + '%';
                     if (sidebarMemBar) sidebarMemBar.style.width = memPercent + '%';
                 }
                 break;
@@ -889,10 +957,13 @@ function processMetrics(metrics) {
     // Calculate overall GPU usage from maximum engine utilization
     if (gpuEngineUsages.length > 0) {
         const maxGpuUsage = Math.max(...gpuEngineUsages);
-        const gpuVal = document.getElementById('metrics-gpu-val');
-        if (gpuVal) gpuVal.textContent = maxGpuUsage.toFixed(1) + '%';
-        pushStatSample(gpuChart, maxGpuUsage);
+        gpuVal = maxGpuUsage;
+        const gpuEl = document.getElementById('metrics-gpu-val');
+        if (gpuEl) gpuEl.textContent = maxGpuUsage.toFixed(1) + '%';
     }
+
+    // Push all three values as a single time-aligned sample
+    pushCombinedSample(cpuVal, gpuVal, memVal);
 }
 
 // Initialize metrics system when page loads

@@ -1,33 +1,6 @@
 # Copyright (C) 2025 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-"""
-Live Video Alert Agent — FastAPI application entry-point.
-
-Endpoints
----------
-GET  /                      Dashboard UI (HTML)
-GET  /health                Health check (liveness probe)
-GET  /ready                 Readiness probe (K8s / Docker healthcheck)
-GET  /metrics               System + per-stream metrics (JSON)
-
-GET  /events                SSE stream (real-time analysis + alert_action events)
-GET  /video_feed            MJPEG stream for a single stream
-GET  /data                  Legacy polling endpoint (fallback)
-
-GET  /streams               List active streams with status
-POST /streams               Register a new stream
-DELETE /streams/{id}        Remove a stream
-
-GET  /config/alerts         Get alert configurations
-POST /config/alerts         Update alert configurations
-
-GET  /tools                 List registered action tools
-POST /tools/{name}/invoke   Manually invoke a tool
-
-GET  /alerts/history        Query alert history
-"""
-
 import asyncio
 import json
 import logging
@@ -57,7 +30,7 @@ from src.schemas.api import (
     ToolInvokeRequest,
     ToolInvokeResponse,
 )
-from src.schemas.monitor import AlertConfig, AlertSeverity
+from src.schemas.monitor import AlertConfig
 from src.agentic.mcp_client import (
     initialize_mcp_servers,
     shutdown_mcp_servers,
@@ -304,13 +277,28 @@ async def video_feed(stream_id: str = "default"):
     )
 
 
-
 @app.get("/data", tags=["Streaming"])
 async def get_data():
-    """Legacy polling endpoint — prefer /events (SSE) for new integrations."""
-    if manager:
-        return JSONResponse(content=manager.latest_results)
-    return JSONResponse(content={})
+    """Polling endpoint returning latest VLM results enriched with runtime state."""
+    if not manager:
+        return JSONResponse(content={})
+
+    enriched = {}
+    for stream_id, alerts in manager.latest_results.items():
+        runtime_states = manager.alert_state.get_runtime_states(stream_id)
+        enriched_alerts = {}
+        for alert_name, result in alerts.items():
+            entry = dict(result)
+            state = runtime_states.get(alert_name, {})
+            entry["consecutive_yes"] = state.get("consecutive_yes", 0)
+            entry["consecutive_no"] = state.get("consecutive_no", 0)
+            entry["last_answer"] = state.get("last_answer", "NO")
+            enriched_alerts[alert_name] = entry
+        enriched[stream_id] = {
+            "stream_name": manager.stream_names.get(stream_id, stream_id),
+            "alerts": enriched_alerts,
+        }
+    return JSONResponse(content=enriched)
 
 
 
@@ -323,7 +311,7 @@ async def get_streams():
         health = stream_mgr.get_health()
         result.append(
             StreamStatus(
-                id=sid,
+                stream_id=sid,
                 name=mgr.stream_names.get(sid, ""),
                 url=stream_mgr.rtsp_url,
                 connected=health.connected,
@@ -347,7 +335,7 @@ async def add_stream(
     if stream_id in mgr.streams:
         raise HTTPException(status_code=409, detail=f"Stream '{stream_id}' already exists")
     mgr.add_stream(stream_id, data.url, name=data.name, tools=data.tools, alerts=data.alerts)
-    return StreamResponse(status="added", id=stream_id)
+    return StreamResponse(status="added", stream_id=stream_id)
 
 
 @app.delete("/streams/{stream_id}", response_model=StreamResponse, tags=["Streams"])
@@ -359,7 +347,7 @@ async def remove_stream(
     if stream_id not in mgr.streams:
         raise HTTPException(status_code=404, detail=f"Stream '{stream_id}' not found")
     mgr.remove_stream(stream_id)
-    return StreamResponse(status="removed", id=stream_id)
+    return StreamResponse(status="removed", stream_id=stream_id)
 
 
 @app.patch("/streams/{stream_id}", tags=["Streams"])
@@ -397,8 +385,6 @@ async def update_alerts_config(
     - name (str, required)
     - prompt (str, required)
     - enabled (bool, default true)
-    - severity (low|medium|high|critical, default medium)
-    - cooldown_seconds (float >= 0, default 60)
     - tools (list of tool names, default [\"log_alert\"])
     - escalation (optional: {threshold_consecutive, additional_tools})
     """
@@ -590,41 +576,6 @@ async def invoke_mcp_tool(
             result={"error": str(exc)},
             duration_ms=round(duration_ms, 1),
         )
-
-
-@app.get("/alerts/history", tags=["Alerts"])
-async def get_alert_history(
-    stream_id: Optional[str] = None,
-    alert_name: Optional[str] = None,
-    severity: Optional[str] = None,
-    answer: Optional[str] = None,
-    limit: int = 50,
-):
-    """
-    Query alert detection history.
-
-    Supports filtering by stream_id, alert_name, severity, and answer.
-    Results are returned newest-first.
-    """
-    mgr = _require_manager()
-    sev_enum = None
-    if severity:
-        try:
-            sev_enum = AlertSeverity(severity)
-        except ValueError:
-            raise HTTPException(status_code=422, detail=f"Unknown severity: {severity}")
-
-    events = mgr.alert_state.get_history(
-        stream_id=stream_id,
-        alert_name=alert_name,
-        severity=sev_enum,
-        answer=answer,
-        limit=min(limit, 500),
-    )
-    return JSONResponse(content={
-        "count": len(events),
-        "events": [e.model_dump(mode="json") for e in events],
-    })
 
 
 @app.get("/", response_class=HTMLResponse, tags=["UI"])

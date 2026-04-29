@@ -2,24 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Domain schemas for alert configuration, VLM results, and alert history.
+Domain schemas for alert configuration and VLM results.
 """
 
 from __future__ import annotations
 
 import re
-from datetime import datetime
-from enum import Enum
 from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
-
-
-class AlertSeverity(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
 
 
 class EscalationConfig(BaseModel):
@@ -39,14 +30,12 @@ class AlertConfig(BaseModel):
     """
     Full configuration for a single named alert.
 
-    Example JSON (resources/agents.json entry):
+    Example JSON (resources/alerts.json entry):
     {
         "name": "Fire Detection",
         "prompt": "Is there visible fire or smoke in the image?",
         "enabled": true,
-        "severity": "critical",
-        "cooldown_seconds": 60,
-        "tools": ["log_alert", "send_email", "capture_snapshot"],
+        "tools": ["log_alert", "capture_snapshot"],
         "escalation": {"threshold_consecutive": 3, "additional_tools": ["trigger_webhook"]}
     }
     """
@@ -54,12 +43,7 @@ class AlertConfig(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
     prompt: str = Field(..., min_length=5, max_length=500)
     enabled: bool = True
-    severity: AlertSeverity = AlertSeverity.MEDIUM
-    # Minimum seconds between consecutive action executions for this alert.
-    # Within the cooldown window, detections are still recorded but actions
-    # are suppressed to prevent notification floods.
-    cooldown_seconds: float = Field(default=60.0, ge=0)
-    # Tool names to invoke when this alert fires (answer == YES and cooldown passed).
+    # Tool names to invoke when this alert fires (answer == YES).
     tools: List[str] = Field(default_factory=lambda: ["log_alert", "capture_snapshot"])
     # Per-tool argument overrides. Keys are tool names, values are dicts of
     # keyword arguments (supports {{variable}} template placeholders).
@@ -78,21 +62,6 @@ class AgentResult(BaseModel):
     """Structured YES/NO response returned by the VLM for one alert question."""
     answer: Literal["YES", "NO"] = Field(..., description="Exactly YES or NO")
     reason: str = Field(..., description="Brief explanation for the answer")
-
-
-class AlertEvent(BaseModel):
-    """A single alert detection event stored in history."""
-    event_id: str
-    timestamp: datetime
-    stream_id: str
-    alert_name: str
-    severity: AlertSeverity
-    answer: Literal["YES", "NO"]
-    reason: str
-    consecutive_count: int = 1
-    actions_taken: List[str] = Field(default_factory=list)
-    escalated: bool = False
-    snapshot_path: Optional[str] = None
 
 
 class AlertRuntimeState(BaseModel):

@@ -4,51 +4,37 @@
 
 - This release includes only limited testing on EMT‑S and EMT‑D. Some behaviors may not yet be fully validated across all scenarios.
 
-## ADK mode requires internet access
+## ADK mode requires LLM service to be reachable
 
-Setting `USE_ADK=true` establishes a connection to Google’s Gemini API on every
-alert dispatch. In air-gapped or restricted-network environments:
+`USE_ADK=true` is the **default** and connects to the `ovms-llm` service on every
+alert dispatch. If that container is not running or unreachable:
 
-- Use `USE_LOCAL_LLM=true` with a locally hosted model instead.
-- Or omit both flags to fall back to rule-based mode (no external LLM needed).
+- Ensure the `ovms-llm` service has started: `docker logs ovms-llm | grep AVAILABLE`
+- Set `USE_ADK=false` to fall back to rule-based dispatch (no external LLM needed).
 
-## Local LLM tool-calling support varies by model
+## LLM tool-calling support varies by model
 
 Not all OVMS-served text models implement robust OpenAI-style function-calling.
 The agent automatically falls back to JSON text parsing in that case, but very
 small models (< 3B parameters) may produce unpredictable output.
 
-Recommended models for reliable tool-calling: `Phi-4-mini-instruct`,
+Recommended models for reliable tool-calling: `Phi-4-mini-instruct-int4-ov`,
 `Phi-3.5-mini-instruct`, `Mistral-7B-Instruct` (OV-converted variants).
 
 If neither strategy returns valid tool names, rule-based dispatch is used as a
 final fallback — alerts continue to function.
 
-## Email tool silently skipped when SMTP not configured
-
-If `send_email` is listed in an alert’s `tools` array but `SMTP_HOST` is not set,
-the tool logs a warning and returns without error. Verify SMTP settings with:
-```bash
-curl -X POST http://localhost:9000/tools/send_email/invoke \
-  -H "X-API-Key: ${API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{"parameters": {"subject": "test", "body": "test", "stream_id": "cam1", "alert_name": "test", "severity": "low"}}'
-```
 
 ## Snapshot directory not writable
 
 If `capture_snapshot` fails with a permission error, the container’s
 `/app/snapshots` directory may not be writable by `appuser`:
 ```bash
-docker exec live-video-alert ls -la /app/snapshots
+docker exec live-video-alert-agent ls -la /app/snapshots
 ```
 If using a host-bind mount instead of the `snapshots` named volume, ensure the
 host directory is owned by UID 1000.
 
-## API config endpoint renamed
-
-As of 2.0.0, `/config/agents` is renamed to `/config/alerts`. Clients using the
-old path will receive a 404. Update integrations accordingly.
 
 ## RTSP stream not connecting
 
@@ -90,7 +76,19 @@ Symptoms:
 Checks:
 - Verify model loaded: `docker logs ovms-vlm | grep "AVAILABLE"`.
 - Simplify prompts to ask clear yes/no questions.
-- Reduce concurrent alerts (max 4).
+- Reduce concurrent alerts (max 4) if batching issues occur.
+
+## MCP server connection failures
+
+Symptoms:
+- Logs show `[mcp/{server}] Connection failed` at startup.
+- `GET /mcp/status` shows `connected: false`.
+
+Checks:
+- Verify the MCP server is running and reachable from the container.
+- Check `url` in `resources/mcp_servers.json` is correct.
+- Set `enabled: false` for an MCP server entry to disable it without removing it.
+- Use `POST /mcp/reload` to reconnect without restarting the application.
 
 ## Performance/throughput lower than expected
 

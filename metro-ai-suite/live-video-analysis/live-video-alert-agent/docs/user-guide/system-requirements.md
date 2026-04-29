@@ -40,17 +40,6 @@ export OVMS_SOURCE_MODEL=OpenVINO/InternVL2-2B-int4-ov
 export MODEL_NAME=InternVL2-2B
 ```
 
-## Optional: Local LLM for Agentic Dispatch
-
-To use `USE_LOCAL_LLM=true` without installing a separate service, a text-only
-model can be served alongside the vision model by OVMS using a multi-model
-configuration:
-
-| Backend | Default URL |
-|---|---|
-| OVMS text model | `http://ovms:8000/v3` |
-
-No additional Python packages are required — the `openai` SDK is already included.
 
 ## Validation
 
