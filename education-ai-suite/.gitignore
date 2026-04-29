@@ -2,8 +2,15 @@
 __pycache__/
 *.py[cod]
 
+# Ignore virtual environments
+*venv*
+
 # Ignore storage directory
 storage/
+chroma_data/
+data/
+sqlite_db/
+**/local_storage/data/
 
 # Ignore models directory
 models/
@@ -12,4 +19,8 @@ models/
 chunks/
 
 #Ignore logs
-monitoring/executionlogs/
+**/monitoring/executionlogs/
+logs/
+
+*.exe
+*.whl

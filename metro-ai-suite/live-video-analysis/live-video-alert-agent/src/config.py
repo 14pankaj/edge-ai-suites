@@ -1,13 +1,6 @@
 # Copyright (C) 2025 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-"""
-Application configuration.
-
-All values are read from environment variables with sensible defaults.
-Refer to docs/user-guide/configuration.md for the full reference.
-"""
-
 import os
 import logging
 

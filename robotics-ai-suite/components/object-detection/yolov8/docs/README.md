@@ -17,7 +17,7 @@ RealSense™ camera image as the input.
 
 ## Prerequisites
 
-- [Prepare the target system](https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/robotics-ai-suite/rvc/getstarted/prepare_system.html)
+- [Prepare the target system](https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/robotics-ai-suite/robotics/gsg_robot/index.html)
 - [Setup the Robotics AI Dev Kit APT Repositories](https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/robotics-ai-suite/robotics/gsg_robot/index.html#set-up-the-autonomous-mobile-robot-apt-repositories)
 - [Install OpenVINO™ Packages](https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/robotics-ai-suite/robotics/gsg_robot/index.html#install-openvino-packages)
 - [Install Robotics AI Dev Kit Deb packages](https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/robotics-ai-suite/robotics/gsg_robot/index.html#install-autonomous-mobile-robot-deb-packages)
@@ -30,7 +30,7 @@ Follow the instructions on [Install OpenVINO™ Packages](https://docs.openedgep
 ## Install Python packages (optional)
 
 Following Python packages are necessary to automatically download and
-convert the model to IR files. Also You can provide your own model files
+convert the model to IR files. Also, you can provide your own model files
 in the config, if you have them already.
 
 > ```bash
@@ -87,7 +87,7 @@ be generated in the command output when executing the
 > rgb_topic = []
 > rgb_topic_max_fps = [] # same length as rgb_topic, -1 for unlimited will assume -1 for all topics if not provided
 > # depth is not used by yolo, but if provided this node will synchronize rgb and depth and transform to camera frame
-> # this can be later used to place detections in 3D sSpace
+> # this can be later used to place detections in 3D space
 > # topics need to be provided in pairs
 > rgbd_topic_rgb = ["/camera/color/image_raw"]
 > rgbd_topic_depth = ["/camera/depth/image_raw"]

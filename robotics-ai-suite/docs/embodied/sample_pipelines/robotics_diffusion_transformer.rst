@@ -195,7 +195,7 @@ Inference
 
       cd <rdt_SOURCE_CODE_PATH>
       mkdir google & cd google
-      sudo apt install git-lft
+      sudo apt install git-lfs
       GIT_LFS_SKIP_SMUDGE=1 git clone https://hf-mirror.com/google/t5-v1_1-xxl
       cd t5-v1_1-xxl
       git lfs pull
@@ -226,7 +226,7 @@ After running the above command, you will get two files named ``text_embed_Trans
 
 .. note::
 
-    | For detailed instructions on the model conversion process, please refer to the model tutorial at :doc:`../developer_tools_tutorials/model_tutorials/model_rdt`.
+    | For detailed instructions on the model conversion process, please refer to the model tutorial at :doc:`../model_tutorials/model_rdt`.
     | Of course, you can download `the pre-trained RDT-1B weights <https://hf-mirror.com/robotics-diffusion-transformer/rdt-1b>`_ from the Hugging Face Hub, but it is recommended to fine-tune the weights with ALOHA dataset for better performance to achieve the best results in the ALOHA MUJOCO simulation tasks.
 
 .. code-block:: bash

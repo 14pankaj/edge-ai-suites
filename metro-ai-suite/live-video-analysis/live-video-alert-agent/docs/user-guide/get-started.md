@@ -9,30 +9,33 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
 
 ## Initial Setup
 
-1. **Clone the repository**:
-     ```bash
-     # Clone the latest on mainline
-     git clone https://github.com/open-edge-platform/edge-ai-suites.git edge-ai-suites
-     # Alternatively, clone a specific release branch
-     git clone https://github.com/open-edge-platform/edge-ai-suites.git edge-ai-suites -b <release-tag>
-     ```
-    Note: Adjust the repo link appropriately in case of forked repo.
+1. Clone the suite:
 
 2. **Navigate to the Directory**:
      ```bash
      cd edge-ai-suites/metro-ai-suite/live-video-analysis/live-video-alert-agent
      ```
 
-3. **Configure Image Registry and Tag**:
-     ```bash
-     export REGISTRY="intel/"
-     export TAG="latest"
-     ```
-    Skip this step if you prefer to build the sample application from source. For detailed instructions, refer to [How to Build from Source](./how-to-build-source.md) guide for details.
+   ```bash
+   git clone --filter=blob:none --sparse --branch main https://github.com/open-edge-platform/edge-ai-suites.git
+   cd edge-ai-suites
+   git sparse-checkout set metro-ai-suite
+   cd metro-ai-suite/live-video-analysis/live-video-alert-agent
+   ```
 
-4. **Configure Environment**:
+2. Configure Image Registry and Tag:
 
-   **Core variables** (all optional — streams can also be added via UI after startup):
+   ```bash
+   export REGISTRY="intel/"
+   export TAG="latest"
+   ```
+
+   Skip this step if you prefer to build the sample application from source. For detailed instructions, refer to [How to Build from Source](./get-started/build-from-source.md) guide for details.
+
+3. Configure the Environment:
+
+   Optional environment variables:
+
    ```bash
    # Pre-configure a video stream
    export RTSP_URL=rtsp://<camera-ip>:<port>/stream
@@ -84,45 +87,46 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
    ```
    Configure MCP servers in `resources/mcp_servers.json`. See [API Reference](./api-reference.md#mcp) for details.
 
-5. **Start the Application**:
+4. Start the Application:
    Run the following command from the project root:
 
-     ```bash
-     docker compose up -d
-     ```
+   ```bash
+   docker compose up -d
+   ```
 
    **Note:**
    - First run downloads the VLM model (~2GB, 5-10 minutes)
    - An init container runs briefly to set up volume permissions.
    - Subsequent runs start instantly
 
-6. **Verify Deployment**:
+5. Verify Deployment:
    Check that containers are running:
-     ```bash
-     docker ps
-     ```
+
+   ```bash
+   docker ps
+   ```
 
    View application logs:
-     ```bash
-     docker logs live-video-alert-agent
-     ```
 
-6. **Access the Dashboard**:
-   Open your browser and navigate to:
-     ```
-     http://localhost:9000
-     ```
-   (Replace `localhost` with your server IP if accessing remotely)
+   ```bash
+   docker logs live-video-alert-agent
+   ```
+
+6. Access the Dashboard:
+   Open your browser and navigate to `http://localhost:9000` (Replace `localhost` with your
+   server IP if accessing remotely).
 
 ## Using the Application
 
 ### Adding Video Streams
+
 1. In the sidebar under **Stream Configuration**, enter:
    - **Stream Name**: A descriptive name (e.g., "Lobby Camera")
    - **RTSP URL**: Your camera's RTSP stream URL
 2. Click **Add New Stream**
 
 ### Configuring Alerts
+
 1. Under **AI Agent Alerts** section:
    - Click **Create New Alert**
    - Enter an **Alert Name** (e.g., "Fire Detection")
@@ -150,6 +154,7 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
    ```
 
 ### Viewing Results
+
 - The dashboard shows the live stream with analysis results below
 - Use the dropdown to filter alerts: "All Alerts" or individual alert types
 - Results update automatically via Server-Sent Events (SSE)
@@ -176,6 +181,7 @@ curl http://localhost:9000/tools
 ### Stopping Services
 
 To stop all services:
+
 ```bash
 docker compose down
 ```
@@ -206,6 +212,7 @@ docker logs -f live-video-alert-agent
 ### Clearing Model Cache
 
 If you need to re-download the model or switch models:
+
 ```bash
 # Remove everything including model cache
 docker compose down -v
@@ -224,6 +231,7 @@ docker compose up -d
 **Solution**: An init container (`ovms-init`) automatically sets permissions. It will show as `Exited (0)` - this is normal.
 
 **Verify**:
+
 ```bash
 docker ps -a --filter "name=ovms-init"  # Should show: Exited (0)
 docker exec ovms-vlm ls -lah /models    # Should be owned by ovms
@@ -243,3 +251,19 @@ docker compose down -v
 export RTSP_URL=<your-url>
 docker compose up -d
 ```
+
+## Learn More
+- [Build from Source](./get-started/build-from-source.md)
+- [Deploy with Helm](./get-started/deploy-with-helm.md) - Deploy the application on Kubernetes with the bundled Helm chart.
+
+<!--hide_directive
+:::{toctree}
+:hidden:
+
+./get-started/system-requirements
+./get-started/build-from-source
+./get-started/deploy-with-helm
+
+
+:::
+hide_directive-->

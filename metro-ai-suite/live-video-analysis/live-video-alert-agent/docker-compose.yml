@@ -45,6 +45,10 @@ services:
       - HTTP_PROXY=${http_proxy}
       - https_proxy=${https_proxy}
       - HTTPS_PROXY=${https_proxy}
+      - HF_TOKEN=${HF_TOKEN}
+      - OVMS_SOURCE_MODEL=${OVMS_SOURCE_MODEL:-OpenVINO/Phi-3.5-vision-instruct-int4-ov}
+      - MODEL_NAME=${MODEL_NAME:-Phi-3.5-Vision}
+      - TARGET_DEVICE=${TARGET_DEVICE:-CPU}
     volumes:
       - ovms-models:/models
     ulimits:

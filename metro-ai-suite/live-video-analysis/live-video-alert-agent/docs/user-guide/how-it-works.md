@@ -5,6 +5,9 @@ video streams, applies VLM-based scene understanding, and dispatches configurabl
 actions through an agentic tool-calling pipeline.
 
 ## Architecture Overview
+![System Architecture](./_assets/Architecture.png)
+
+## Data Flow
 
 ```text
 RTSP Sources (N cameras)

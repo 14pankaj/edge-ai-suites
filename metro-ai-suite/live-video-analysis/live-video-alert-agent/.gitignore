@@ -29,3 +29,6 @@ resources/streams.json
 resources/alerts.json
 models/
 shared/
+# Helm
+chart/charts/*.tgz
+chart/charts.lock
