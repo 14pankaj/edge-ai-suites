@@ -38,36 +38,28 @@ class Settings:
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
     RTSP_URL: str = os.getenv("RTSP_URL", "")
-    VLM_URL: str = os.getenv("VLM_URL", "http://localhost:8000/v3")
-    MODEL_NAME: str = os.getenv("MODEL_NAME", "Phi-3.5-Vision")
-    VLM_IMAGE_MAX_DIM: int = _int("VLM_IMAGE_MAX_DIM", 448)
-    VLM_JPEG_QUALITY: int = _int("VLM_JPEG_QUALITY", 70)
-    VLM_TIMEOUT: float = _float("VLM_TIMEOUT", 30.0)
-    VLM_MAX_RETRIES: int = _int("VLM_MAX_RETRIES", 2)
-    VLM_MAX_TOKENS: int = _int("VLM_MAX_TOKENS", 150)
-    VLM_MAX_CONCURRENCY: int = _int("VLM_MAX_CONCURRENCY", 2)
+    VLM_URL: str = os.getenv("VLM_URL", "http://ovms-vlm:8000/v3")
+    MODEL_NAME: str = os.getenv("MODEL_NAME", "Phi-3.5-vision")
+    VLM_IMAGE_MAX_DIM: int = _int("VLM_IMAGE_MAX_DIM", 768)
+    VLM_JPEG_QUALITY: int = _int("VLM_JPEG_QUALITY", 80)
+    VLM_TIMEOUT: float = _float("VLM_TIMEOUT", 15.0)
+    VLM_MAX_RETRIES: int = _int("VLM_MAX_RETRIES", 1)
+    VLM_MAX_TOKENS: int = _int("VLM_MAX_TOKENS", 256)
+    VLM_MAX_CONCURRENCY: int = _int("VLM_MAX_CONCURRENCY", 16)
+    VLM_ALERTS_PER_CALL: int = _int("VLM_ALERTS_PER_CALL", 8)  # max alerts batched per VLM call
 
-    ANALYSIS_INTERVAL: float = _float("ANALYSIS_INTERVAL", 2.0)
-    FRAME_BUFFER_SIZE: int = _int("FRAME_BUFFER_SIZE", 10)
-    CAPTURE_FPS: float = _float("CAPTURE_FPS", 0)  # 0 = auto (1/ANALYSIS_INTERVAL)
-    CAPTURE_RESIZE_HEIGHT: int = _int("CAPTURE_RESIZE_HEIGHT", 720)
+    ACTION_WORKERS: int = _int("ACTION_WORKERS", 4)
 
-    # ADK uses local OVMS endpoint (LOCAL_LLM_URL) for tool dispatch.
+    ANALYSIS_INTERVAL: float = _float("ANALYSIS_INTERVAL", 1.0)
+    FRAME_BUFFER_SIZE: int = _int("FRAME_BUFFER_SIZE",10)
+    CAPTURE_FPS: float = _float("CAPTURE_FPS", 10)  # frames decoded per second
+    CAPTURE_RESIZE_HEIGHT: int = _int("CAPTURE_RESIZE_HEIGHT", 0)  # 0 = skip; VLM client resizes
+    
     USE_ADK: bool = _bool("USE_ADK", True)
 
-    LOCAL_LLM_URL: str = os.getenv("LOCAL_LLM_URL", "http://ovms:8000/v3")
-    LOCAL_LLM_MODEL: str = os.getenv("LOCAL_LLM_MODEL", "Phi-4-mini-instruct")
-    LOCAL_LLM_TIMEOUT: float = _float("LOCAL_LLM_TIMEOUT", 30.0)
-
-    ALERT_HISTORY_SIZE: int = _int("ALERT_HISTORY_SIZE", 500)
-
-    SMTP_HOST: str = os.getenv("SMTP_HOST", "")
-    SMTP_PORT: int = _int("SMTP_PORT", 587)
-    SMTP_USE_TLS: bool = _bool("SMTP_USE_TLS", True)
-    SMTP_USER: str = os.getenv("SMTP_USER", "")
-    SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
-    ALERT_EMAIL_FROM: str = os.getenv("ALERT_EMAIL_FROM", "")
-    ALERT_EMAIL_TO: str = os.getenv("ALERT_EMAIL_TO", "")
+    LLM_URL: str = os.getenv("LLM_URL", "http://ovms-llm:8000/v3")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "Phi-4-mini-instruct")
+    LLM_TIMEOUT: float = _float("LLM_TIMEOUT", 10.0)
 
     WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "")
     # HMAC-SHA256 secret to sign webhook payloads (optional)

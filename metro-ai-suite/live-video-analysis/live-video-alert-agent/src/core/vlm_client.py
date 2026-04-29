@@ -1,18 +1,9 @@
 # Copyright (C) 2025 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-"""
-VLMClient — async OpenAI-compatible wrapper for OVMS VLM inference.
-
-Improvements over the original:
-- system_prompt sent as a proper ``{"role": "system", ...}`` message.
-- Configurable image resolution and JPEG quality (from settings).
-- Retry with exponential backoff for transient network/server errors.
-- Inference latency tracking for metrics.
-"""
-
 import asyncio
 import base64
+import concurrent.futures
 import logging
 import time
 from typing import List, Optional, Tuple
@@ -23,6 +14,11 @@ from openai import AsyncOpenAI, APIError, APITimeoutError, APIConnectionError
 from src.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Thread pool for CPU-bound image encoding so it doesn't block the event loop.
+_encode_pool = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="vlm-encode",
+)
 
 
 class VLMClient:
@@ -49,10 +45,19 @@ class VLMClient:
         if not frames:
             return None
 
+        loop = asyncio.get_running_loop()
+
+        # Encode images in the thread pool so the event loop stays free
+        # for other streams' analysis tasks and SSE broadcasts.
+        encode_futures = [
+            loop.run_in_executor(_encode_pool, self._encode_image, frame)
+            for frame in frames
+        ]
+        encoded_images = await asyncio.gather(*encode_futures)
+
         # Build the user content block (images + text)
         user_content = []
-        for frame in frames:
-            encoded = self._encode_image(frame)
+        for encoded in encoded_images:
             if encoded:
                 user_content.append({
                     "type": "image_url",
@@ -76,17 +81,22 @@ class VLMClient:
         return await self._call_with_retry(messages)
 
     def _encode_image(self, frame) -> Optional[str]:
-        """Resize, JPEG-compress, and base64-encode a single frame."""
+        """Resize, JPEG-compress, and base64-encode a single frame.
+        """
         try:
             h, w = frame.shape[:2]
             max_dim = settings.VLM_IMAGE_MAX_DIM
             if max(h, w) > max_dim:
                 scale = max_dim / max(h, w)
-                frame = cv2.resize(
-                    frame,
-                    (int(w * scale), int(h * scale)),
-                    interpolation=cv2.INTER_AREA,
+                new_w, new_h = int(w * scale), int(h * scale)
+                # INTER_AREA is ideal for large down-scales but INTER_LINEAR
+                # is ~2x faster for moderate ratios typical here (≤2x).
+                interp = (
+                    cv2.INTER_AREA
+                    if scale < 0.5
+                    else cv2.INTER_LINEAR
                 )
+                frame = cv2.resize(frame, (new_w, new_h), interpolation=interp)
             _, buf = cv2.imencode(
                 ".jpg", frame,
                 [int(cv2.IMWRITE_JPEG_QUALITY), settings.VLM_JPEG_QUALITY],

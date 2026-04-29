@@ -15,7 +15,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.config import settings
 from src.schemas.monitor import AlertConfig
-from src.agentic.mcp_client import get_mcp_server_status, get_tool_defaults
+from src.agentic.mcp_client import get_tool_defaults
+from google.adk.agents import LlmAgent
+from google.adk.tools import FunctionTool
+from src.agentic.adk_common import create_adk_model, create_runner
+from src.agentic.adk_common import run_agent_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +191,7 @@ class AlertActionAgent:
     Dispatches actions when an alert fires.
 
     When USE_ADK=true, uses the Google ADK framework backed by the local OVMS
-    endpoint (LOCAL_LLM_URL).  When false, falls back to rule-based dispatch.
+    endpoint (LLM_URL).  When false, falls back to rule-based dispatch.
     """
 
     def __init__(self, use_adk: Optional[bool] = None):
@@ -195,6 +199,10 @@ class AlertActionAgent:
         self._adk_runner = None
         self._session_service = None
         self._known_sessions: set = set()
+        # Per-stream call counters for periodic session reset
+        self._stream_call_counts: Dict[str, int] = {}
+        # Max calls per stream session before context is reset
+        self._max_session_calls: int = 20
 
         if self._use_adk:
             self._init_adk()
@@ -208,98 +216,34 @@ class AlertActionAgent:
         that in-flight sessions survive a tool-list refresh.
         """
         try:
-            from google.adk.agents import LlmAgent
-            from google.adk.models.lite_llm import LiteLlm
-            from google.adk.runners import Runner
-            from google.adk.sessions import InMemorySessionService
-            from google.adk.tools import FunctionTool
-
-            if not settings.LOCAL_LLM_URL:
+            if not settings.LLM_URL:
                 logger.warning(
-                    "USE_ADK=true but LOCAL_LLM_URL is not set — "
+                    "USE_ADK=true but LLM_URL is not set — "
                     "falling back to rule-based mode"
                 )
                 self._use_adk = False
                 return
 
-            # LiteLlm proxies to the local OVMS OpenAI-compatible endpoint.
-            os.environ.setdefault("LITELLM_PROXY_API_KEY", "local")
-            os.environ.setdefault("LITELLM_PROXY_API_BASE", settings.LOCAL_LLM_URL)
-            LiteLlm.use_litellm_proxy = True
-            adk_model = LiteLlm(model=f"litellm_proxy/{settings.LOCAL_LLM_MODEL}")
+            adk_model = create_adk_model()
             logger.info(
-                f"ADK using local OVMS (url={settings.LOCAL_LLM_URL} "
-                f"model={settings.LOCAL_LLM_MODEL})"
+                f"ADK using local OVMS (url={settings.LLM_URL} "
+                f"model={settings.LLM_MODEL})"
             )
 
-            all_tools, all_schemas = get_all_tools()
-
-            builtin_tools_desc = []
-            mcp_tools_desc = []
-            for schema in all_schemas:
-                func = schema.get("function", {})
-                name = func.get("name", "")
-                desc = func.get("description", "")
-                params = func.get("parameters", {}).get("properties", {})
-                param_str = ", ".join(params.keys()) if params else "none"
-                entry = f"  - {name}: {desc} (params: {param_str})"
-                if name.startswith("mcp_"):
-                    mcp_tools_desc.append(entry)
-                else:
-                    builtin_tools_desc.append(entry)
-
-            builtin_section = "BUILT-IN TOOLS:\n" + "\n".join(builtin_tools_desc) if builtin_tools_desc else ""
-
-            mcp_section = ""
-            if mcp_tools_desc:
-                # Gather connected MCP server info
-                try:
-                    servers = get_mcp_server_status()
-                    server_lines = "\n".join(
-                        f"  - {s['name']} ({s['transport']}:{s.get('url', 'stdio')}) connected={s['connected']}"
-                        for s in servers
-                    )
-                except Exception:
-                    server_lines = "  (server info unavailable)"
-
-                mcp_section = (
-                    f"\n\nMCP SERVERS (external integrations):\n{server_lines}\n\n"
-                    "MCP TOOLS (provided by the above servers):\n"
-                    + "\n".join(mcp_tools_desc)
-                    + "\n\n"
-                    "MCP TOOL GUIDELINES:\n"
-                    "- MCP tool names are prefixed with 'mcp_<server>_<tool>'\n"
-                    "- Use MCP tools when the alert context benefits from external data "
-                    "(e.g. querying metrics, checking system health)\n"
-                    "- If a configured_tools list includes an MCP tool, invoke it as you would any other tool\n"
-                )
+            all_tools, _ = get_all_tools()
+            tool_names = ", ".join(all_tools.keys()) or "none loaded"
 
             instruction = (
-                "You are a security alert action agent for a live video surveillance system.\n\n"
-                "TASK: When you receive an alert detection, analyze the severity, context, "
-                "and available tools, then invoke the most appropriate combination of tools "
-                "to handle the alert effectively.\n\n"
-                f"{builtin_section}{mcp_section}\n\n"
+                "You are an alert action agent for a live video surveillance system.\n\n"
+                f"AVAILABLE TOOLS: {tool_names}\n\n"
                 "RULES:\n"
-                "1. ALWAYS invoke log_alert for every alert.\n"
-                "2. Use ALL available tools that are relevant to the alert context — "
-                "you are not limited to the configured_tools list.\n"
-                "3. Select tools based on severity and context:\n"
-                "   - CRITICAL: log_alert + capture_snapshot + send_email (minimum); "
-                "consider trigger_webhook and publish_mqtt as well\n"
-                "   - HIGH: log_alert + capture_snapshot; add send_email if escalated; "
-                "consider MCP tools for additional context\n"
-                "   - MEDIUM: log_alert + any tools that add value (e.g. webhook, MCP queries)\n"
-                "   - LOW: log_alert; optionally add other tools if useful\n"
-                "4. If escalated=true: invoke trigger_webhook and publish_mqtt in addition.\n"
-                "5. Use MCP tools proactively when they can enrich the alert response "
-                "(e.g. query system metrics, check infrastructure health, gather correlated data).\n"
-                "6. Pass relevant alert context (stream_id, alert_name, severity, reason) "
-                "as arguments to MCP tools.\n\n"
-                "After invoking tools, return a one-line summary of actions taken."
+                "1. ALWAYS invoke log_alert.\n"
+                "2. Invoke the tools from configured_tools that fit the alert context.\n"
+                "3. If escalated=true, invoke more tools (webhook, mqtt).\n"
+                "4. Use MCP tools (mcp_ prefix) when they can enrich the response.\n"
+                "Return a one-line summary of actions taken."
             )
 
-            # Create FunctionTools for all available tools (built-in + MCP)
             adk_tools = [FunctionTool(fn) for fn in all_tools.values()]
 
             agent = LlmAgent(
@@ -311,20 +255,14 @@ class AlertActionAgent:
             )
 
             # Reuse existing session service when refreshing tools so that
-            # in-flight alert sessions are not silently dropped.
-            if preserve_sessions and self._session_service is not None:
-                session_service = self._session_service
-            else:
-                session_service = InMemorySessionService()
+            reuse_svc = self._session_service if preserve_sessions else None
+            self._adk_runner, self._session_service = create_runner(
+                agent, "live-video-alert-agent", session_service=reuse_svc,
+            )
+            if not preserve_sessions:
                 self._known_sessions.clear()
 
-            self._session_service = session_service
-            self._adk_runner = Runner(
-                agent=agent,
-                app_name="live-video-alert-agent",
-                session_service=session_service,
-            )
-            logger.info(f"AlertActionAgent initialised with ADK (model=local:{settings.LOCAL_LLM_MODEL})")
+            logger.info(f"AlertActionAgent initialised with ADK (model=local:{settings.LLM_MODEL})")
 
         except ImportError as exc:
             logger.warning(
@@ -348,6 +286,18 @@ class AlertActionAgent:
         logger.info("Re-initialising ADK agent with updated tool set ...")
         self._init_adk(preserve_sessions=True)
 
+    def clear_sessions_for_streams(self, stream_ids: set) -> None:
+        """Drop ADK session state for the given stream IDs
+        """
+        for stream_id in stream_ids:
+            session_id = f"stream_{stream_id}".replace(" ", "_")
+            self._known_sessions.discard(session_id)
+            self._stream_call_counts.pop(stream_id, None)
+        if stream_ids:
+            logger.debug(
+                f"Cleared ADK sessions for streams: {stream_ids}"
+            )
+
     async def dispatch(
         self,
         stream_id: str,
@@ -369,7 +319,7 @@ class AlertActionAgent:
         if self._use_adk and self._adk_runner:
             logger.info(
                 f"[DISPATCH] mode=adk-local stream={stream_id} alert={alert_cfg.name} "
-                f"severity={alert_cfg.severity.value} escalated={escalated}"
+                f"escalated={escalated}"
             )
             return await self._dispatch_adk(
                 stream_id, alert_cfg, answer, reason,
@@ -378,7 +328,7 @@ class AlertActionAgent:
         else:
             logger.info(
                 f"[DISPATCH] mode=rule_based stream={stream_id} alert={alert_cfg.name} "
-                f"severity={alert_cfg.severity.value} escalated={escalated}"
+                f"escalated={escalated}"
             )
             return await self._dispatch_rule_based(
                 stream_id, alert_cfg, answer, reason,
@@ -433,7 +383,6 @@ class AlertActionAgent:
         common_ctx = {
             "stream_id": stream_id,
             "alert_name": alert_cfg.name,
-            "severity": alert_cfg.severity.value,
             "answer": answer,
             "reason": reason,
             "consecutive_count": consecutive_count,
@@ -506,20 +455,28 @@ class AlertActionAgent:
         Feed alert context into the ADK agent and let it decide tool calls.
         """
         try:
-            session_id = f"{stream_id}_{alert_cfg.name}".replace(" ", "_")
+            # --- per-stream session management ---
+            session_id = f"stream_{stream_id}".replace(" ", "_")
+            count = self._stream_call_counts.get(stream_id, 0) + 1
+            self._stream_call_counts[stream_id] = count
 
-            # Create the session if it doesn't exist yet
-            if session_id not in self._known_sessions:
-                await self._session_service.create_session(
-                    app_name="live-video-alert-agent",
-                    user_id="system",
-                    session_id=session_id,
-                )
-                self._known_sessions.add(session_id)
+            # Periodic reset: delete the session 
+            if count > self._max_session_calls and session_id in self._known_sessions:
+                try:
+                    await self._session_service.delete_session(
+                        app_name="live-video-alert-agent",
+                        user_id="system",
+                        session_id=session_id,
+                    )
+                except Exception:
+                    pass  # best-effort; create_session below will overwrite
+                self._known_sessions.discard(session_id)
+                self._stream_call_counts[stream_id] = 1
+                logger.debug(f"Reset ADK session for stream '{stream_id}'")
 
             logger.info(
                 f"[ADK] Sending to ADK agent — stream={stream_id} "
-                f"alert={alert_cfg.name} model={settings.LOCAL_LLM_MODEL} "
+                f"alert={alert_cfg.name} model={settings.LLM_MODEL} "
                 f"session={session_id}"
             )
 
@@ -527,7 +484,6 @@ class AlertActionAgent:
                 f"Alert detection result:\n"
                 f"  stream_id: {stream_id}\n"
                 f"  alert_name: {alert_cfg.name}\n"
-                f"  severity: {alert_cfg.severity.value}\n"
                 f"  answer: {answer}\n"
                 f"  reason: {reason}\n"
                 f"  consecutive_count: {consecutive_count}\n"
@@ -537,31 +493,35 @@ class AlertActionAgent:
                 f"\nPlease handle this alert appropriately."
             )
 
-            # ADK runner.run() is synchronous — run in thread pool
-            invoked_tools: List[str] = []
+            _, invoked_tools = await run_agent_prompt(
+                runner=self._adk_runner,
+                session_service=self._session_service,
+                session_id=session_id,
+                prompt=prompt,
+                timeout=settings.LLM_TIMEOUT,
+                known_sessions=self._known_sessions,
+            )
 
-            def _run_adk():
-                from google.genai import types
-                events = self._adk_runner.run(
-                    user_id="system",
-                    session_id=session_id,
-                    new_message=types.Content(parts=[types.Part(text=prompt)]),
-                )
-                called = []
-                for event in events:
-                    if hasattr(event, "tool_call") and event.tool_call:
-                        called.append(event.tool_call.name)
-                return called
-
-            invoked_tools = await asyncio.to_thread(_run_adk)
             logger.info(
                 f"ADK agent invoked tools for [{stream_id}][{alert_cfg.name}]: "
                 f"{invoked_tools}"
             )
             return invoked_tools
 
+        except asyncio.TimeoutError:
+            logger.error(
+                f"ADK dispatch timed out after {settings.LLM_TIMEOUT}s "
+                f"for [{stream_id}][{alert_cfg.name}] — falling back to rule-based"
+            )
+            return await self._dispatch_rule_based(
+                stream_id, alert_cfg, answer, reason,
+                consecutive_count, escalated, snapshot_path,
+            )
         except Exception as exc:
-            logger.error(f"ADK dispatch failed: {exc} — falling back to rule-based")
+            logger.error(
+                f"ADK dispatch failed for [{stream_id}][{alert_cfg.name}]: "
+                f"{type(exc).__name__}: {exc} — falling back to rule-based"
+            )
             return await self._dispatch_rule_based(
                 stream_id, alert_cfg, answer, reason,
                 consecutive_count, escalated, snapshot_path,
@@ -579,7 +539,6 @@ def _build_tool_kwargs(
     base = {
         "stream_id": ctx["stream_id"],
         "alert_name": ctx["alert_name"],
-        "severity": ctx["severity"],
     }
     if tool_name == "log_alert":
         return {
@@ -589,22 +548,6 @@ def _build_tool_kwargs(
             "consecutive_count": consecutive_count,
             "escalated": escalated,
             "snapshot_path": snapshot_path,
-        }
-    if tool_name == "send_email":
-        severity = ctx["severity"].upper()
-        return {
-            "subject": f"[{severity}] {ctx['alert_name']} — {ctx['stream_id']}",
-            "body": (
-                f"Alert: {ctx['alert_name']}\n"
-                f"Stream: {ctx['stream_id']}\n"
-                f"Severity: {ctx['severity']}\n"
-                f"Answer: {ctx['answer']}\n"
-                f"Reason: {ctx['reason']}\n"
-                f"Consecutive detections: {consecutive_count}\n"
-                f"Escalated: {escalated}\n"
-                + (f"Snapshot: {snapshot_path}\n" if snapshot_path else "")
-            ),
-            **{k: base[k] for k in ("stream_id", "alert_name", "severity")},
         }
     if tool_name == "trigger_webhook":
         return {

@@ -72,7 +72,7 @@ Server-Sent Events stream for real-time updates.
       "severity": "critical",
       "answer": "YES",
       "reason": "Flames visible in lower-left quadrant",
-      "actions_taken": ["log_alert", "capture_snapshot", "send_email"],
+      "actions_taken": ["log_alert", "capture_snapshot"],
       "escalated": false,
       "snapshot_path": "/app/snapshots/cam1/Fire_Detection_critical_20260312T100512.jpg"
     }
@@ -85,9 +85,24 @@ MJPEG stream for live frame preview.
 - **Response Type**: `multipart/x-mixed-replace; boundary=frame`
 
 ### `GET /data`
-Legacy polling endpoint for backward compatibility. Prefer `/events` for new
-integrations.
-- **Response**: `{"<stream_id>": {"<alert_name>": {"answer": ..., "reason": ...}}}`
+Polling endpoint returning latest VLM results enriched with runtime alert state. Prefer `/events` for new integrations.
+- **Response**:
+  ```json
+  {
+    "cam1": {
+      "stream_name": "Lobby Camera",
+      "alerts": {
+        "Fire Detection": {
+          "answer": "NO",
+          "reason": "No fire or smoke visible",
+          "consecutive_yes": 0,
+          "consecutive_no": 3,
+          "last_answer": "NO"
+        }
+      }
+    }
+  }
+  ```
 
 ---
 
@@ -100,30 +115,52 @@ List all active streams with health status.
   {
     "streams": [
       {
-        "id": "cam1",
+        "stream_id": "cam1",
+        "name": "Lobby Camera",
         "url": "rtsp://192.168.1.10:554/stream",
         "connected": true,
         "fps": 1.0,
         "resolution": "1920x1080",
-        "buffer_fill": 1
+        "buffer_fill": 1,
+        "tools": [],
+        "alerts": []
       }
     ]
   }
   ```
 
-### `POST /streams`  `🔑 auth`
+### `POST /streams`
 Register a new video stream.
 - **Request Body**:
   ```json
-  {"id": "cam1", "url": "rtsp://192.168.1.10:554/stream"}
+  {
+    "stream_id": "cam1",
+    "name": "Lobby Camera",
+    "url": "rtsp://192.168.1.10:554/stream",
+    "tools": [],
+    "alerts": []
+  }
   ```
-- **Response**: `{"status": "added", "id": "cam1"}`
-- **Status Codes**: `200` added | `409` already exists | `422` validation error | `401` missing API key
+- **Response**: `{"status": "added", "stream_id": "cam1"}`
+- **Status Codes**: `200` added | `409` already exists | `422` validation error
 
-### `DELETE /streams/{stream_id}`  `🔑 auth`
+### `PATCH /streams/{stream_id}`
+Update per-stream settings.
+- **Request Body**:
+  ```json
+  {"alerts": ["Fire Detection", "Person Detection"]}
+  ```
+  - `alerts` — list of alert names to evaluate for this stream
+- **Response**:
+  ```json
+  {"id": "cam1", "alerts": ["Fire Detection", "Person Detection"]}
+  ```
+- **Status Codes**: `200` updated | `404` not found
+
+### `DELETE /streams/{stream_id}`
 Remove an active stream.
-- **Response**: `{"status": "removed", "id": "cam1"}`
-- **Status Codes**: `200` removed | `404` not found | `401` missing API key
+- **Response**: `{"status": "removed", "stream_id": "cam1"}`
+- **Status Codes**: `200` removed | `404` not found
 
 ---
 
@@ -133,7 +170,7 @@ Remove an active stream.
 Return the current alert configurations.
 - **Response**: array of `AlertConfig` objects (see schema below).
 
-### `POST /config/alerts`  `🔑 auth`
+### `POST /config/alerts`
 Replace the full alert configuration.
 - **Request Body**: array of alert config objects:
   ```json
@@ -142,9 +179,7 @@ Replace the full alert configuration.
       "name": "Fire Detection",
       "prompt": "Is there fire or smoke visible?",
       "enabled": true,
-      "severity": "critical",
-      "cooldown_seconds": 60,
-      "tools": ["log_alert", "capture_snapshot", "send_email"],
+      "tools": ["log_alert", "capture_snapshot"],
       "escalation": {
         "threshold_consecutive": 3,
         "additional_tools": ["trigger_webhook", "publish_mqtt"]
@@ -154,8 +189,6 @@ Replace the full alert configuration.
       "name": "Person Detection",
       "prompt": "Is there a person in the frame?",
       "enabled": true,
-      "severity": "medium",
-      "cooldown_seconds": 30,
       "tools": ["log_alert"]
     }
   ]
@@ -164,55 +197,18 @@ Replace the full alert configuration.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Alert identifier (alphanumeric, spaces, hyphens) |
+| `name` | string | yes | Alert identifier (letters, digits, spaces, hyphens, dots, underscores) |
 | `prompt` | string | yes | Natural-language yes/no question sent to the VLM |
 | `enabled` | bool | no (default `true`) | Whether this alert is active |
-| `severity` | `low`\|`medium`\|`high`\|`critical` | no (default `medium`) | Severity level; drives ADK/LLM tool selection |
-| `cooldown_seconds` | float ≥ 0 | no (default `60`) | Minimum interval between repeated alert actions |
-| `tools` | list of tool names | no (default `["log_alert"]`) | Tools to invoke when alert fires |
-| `escalation.threshold_consecutive` | int ≥ 1 | no | Consecutive YES count before escalation |
+| `tools` | list of tool names | no (default `["log_alert", "capture_snapshot"]`) | Tools to invoke when alert fires |
+| `tool_arguments` | object | no | Per-tool argument overrides; supports `{{variable}}` template placeholders |
+| `escalation.threshold_consecutive` | int (≥ 2) | no | Consecutive YES count before escalation |
 | `escalation.additional_tools` | list of tool names | no | Extra tools added on escalation |
 
-- **Valid tool names**: `log_alert`, `capture_snapshot`, `send_email`, `trigger_webhook`, `publish_mqtt`
+- **Valid built-in tool names**: `log_alert`, `capture_snapshot`, `trigger_webhook`, `publish_mqtt`
+- **MCP tool names** (when `MCP_ENABLED=true`): prefixed with `mcp_{server_name}_` (see [MCP section](#mcp))
 - **Response**: `{"status": "saved", "count": 2}`
-- **Status Codes**: `200` saved | `422` schema validation failed | `401` missing API key
-
----
-
-## Alert History
-
-### `GET /alerts/history`
-Query the in-memory alert detection history (newest-first).
-- **Query Parameters**:
-
-| Parameter | Type | Description |
-|---|---|---|
-| `stream_id` | string | Filter by stream |
-| `alert_name` | string | Filter by alert name |
-| `severity` | string | Filter by severity (`low`\|`medium`\|`high`\|`critical`) |
-| `answer` | string | Filter by VLM answer (`YES`\|`NO`) |
-| `limit` | int (1–500, default 50) | Maximum results to return |
-
-- **Response**:
-  ```json
-  {
-    "count": 2,
-    "events": [
-      {
-        "event_id": "abc123",
-        "stream_id": "cam1",
-        "alert_name": "Fire Detection",
-        "severity": "critical",
-        "answer": "YES",
-        "reason": "Flames visible",
-        "timestamp": "2026-03-12T10:05:12Z",
-        "actions_taken": ["log_alert", "capture_snapshot", "send_email"],
-        "escalated": false,
-        "snapshot_path": "/app/snapshots/cam1/Fire_Detection_critical_20260312T100512.jpg"
-      }
-    ]
-  }
-  ```
+- **Status Codes**: `200` saved | `422` schema validation failed
 
 ---
 
@@ -225,19 +221,23 @@ on environment variable configuration).
   ```json
   {
     "tools": [
-      {"name": "log_alert", "description": "...", "enabled": true},
-      {"name": "send_email", "description": "...", "enabled": false}
+      {
+        "name": "log_alert",
+        "description": "...",
+        "enabled": true,
+        "parameters": {}
+      }
     ]
   }
   ```
 
-### `POST /tools/{tool_name}/invoke`  `🔑 auth`
+### `POST /tools/{tool_name}/invoke`
 Manually invoke a registered tool for testing.
-- **Path Parameters**: `tool_name` — one of `log_alert`, `send_email`,
+- **Path Parameters**: `tool_name` — one of `log_alert`,
   `trigger_webhook`, `capture_snapshot`, `publish_mqtt`
 - **Request Body**:
   ```json
-  {"parameters": {"stream_id": "cam1", "alert_name": "Test", "severity": "low"}}
+  {"parameters": {"stream_id": "cam1", "alert_name": "Test"}}
   ```
 - **Response**:
   ```json
@@ -248,7 +248,84 @@ Manually invoke a registered tool for testing.
     "duration_ms": 1.2
   }
   ```
-- **Status Codes**: `200` (success or error both return 200 with `status` field) | `404` tool not found | `401` missing API key
+- **Status Codes**: `200` (success or error both return 200 with `status` field) | `404` tool not found
+
+### `POST /tools/reload`
+Reload tool definitions from `resources/tools.json` without restarting the application.
+- **Response**: `{"status": "ok", "tools_loaded": 4}`
+- **Status Codes**: `200` ok
+
+---
+
+---
+
+## MCP
+
+Model Context Protocol (MCP) endpoints allow the agent to discover and invoke tools from
+external MCP servers. Enabled when `MCP_ENABLED=true` (default). Server connections can be
+configured an added in `resources/mcp_servers.json`.
+
+### `GET /mcp/status`
+Get connection status and available tools per configured MCP server.
+- **Response**:
+  ```json
+  {
+    "enabled": true,
+    "servers": [
+      {
+        "name": "prometheus",
+        "connected": true,
+        "transport": "http",
+        "url": "http://10.0.0.1:8080/mcp",
+        "tool_count": 6
+      }
+    ],
+    "total_tools": 6
+  }
+  ```
+- When `MCP_ENABLED=false`: `{"enabled": false, "servers": [], "total_tools": 0}`
+
+### `GET /mcp/tools`
+List all tools available from connected MCP servers.
+- **Response**:
+  ```json
+  {
+    "tools": [
+      {
+        "name": "mcp_prometheus_execute_query",
+        "description": "[MCP:prometheus] Execute a PromQL query",
+        "server": "prometheus",
+        "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}}
+      }
+    ],
+    "count": 6
+  }
+  ```
+- Tool names are prefixed with `mcp_{server_name}_` to avoid conflicts with built-in tools.
+
+### `POST /mcp/reload`
+Reload MCP server configuration from `resources/mcp_servers.json` and reconnect to all servers.
+- **Response**: `{"status": "ok", "tools_loaded": 6}`
+- When `MCP_ENABLED=false`: `{"status": "skipped", "reason": "MCP is disabled", "tools_loaded": 0}`
+- **Status Codes**: `200` ok | `500` reload failed
+
+### `POST /mcp/tools/{tool_name}/invoke`
+Manually invoke an MCP tool for testing.
+- **Path Parameters**: `tool_name` — full prefixed name (e.g. `mcp_prometheus_execute_query`)
+- **Request Body**:
+  ```json
+  {"parameters": {"query": "up"}}
+  ```
+- **Response**:
+  ```json
+  {
+    "tool": "mcp_prometheus_execute_query",
+    "status": "success",
+    "result": {...},
+    "duration_ms": 45.3
+  }
+  ```
+- **Status Codes**: `200` | `404` tool not found | `503` MCP disabled or server not connected
 
 ---
 

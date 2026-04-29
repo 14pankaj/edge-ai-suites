@@ -9,15 +9,6 @@
     "parameters": {"type": "object", "properties": {}}
   },
   {
-    "name": "send_email",
-    "module": "src.agentic.tools.email_tool",
-    "function": "send_email_alert",
-    "enabled": true,
-    "description": "Send an email notification about the alert to configured recipients.",
-    "requires_env": ["SMTP_HOST"],
-    "parameters": {"type": "object", "properties": {}}
-  },
-  {
     "name": "trigger_webhook",
     "module": "src.agentic.tools.webhook_tool",
     "function": "trigger_webhook",

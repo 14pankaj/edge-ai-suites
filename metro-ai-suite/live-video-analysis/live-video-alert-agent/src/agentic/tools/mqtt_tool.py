@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 async def publish_mqtt(
     stream_id: str,
     alert_name: str,
-    severity: str,
     answer: str,
     reason: str,
     topic_override: Optional[str] = None,
@@ -47,7 +46,6 @@ async def publish_mqtt(
     payload = json.dumps({
         "stream_id": stream_id,
         "alert_name": alert_name,
-        "severity": severity,
         "answer": answer,
         "reason": reason,
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
