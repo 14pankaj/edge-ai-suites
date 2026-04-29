@@ -57,7 +57,6 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
    ```bash
    export USE_ADK=true   # this is the default
    export COMPOSE_PROFILES=$([[ "${USE_ADK}" == "true" ]] && echo "adk-llm" || echo "") #So if USE_ADK changes this env get updated as well
-   export LLM_URL=http://ovms-llm:8000/v3
    export LLM_MODEL=Phi-4-mini-instruct-int4-ov
    ```
 

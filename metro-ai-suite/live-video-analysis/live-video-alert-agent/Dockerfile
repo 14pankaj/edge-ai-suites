@@ -37,6 +37,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy application source
 COPY --chown=appuser:appuser src/ ./src/
+COPY --chown=appuser:appuser resources/tools.json ./resources/tools.json
 RUN mkdir -p /app/snapshots /app/config /app/resources \
     && chown -R appuser:appuser /app/snapshots /app/config /app/resources
 

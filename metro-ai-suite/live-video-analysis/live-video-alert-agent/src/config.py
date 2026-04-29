@@ -65,9 +65,12 @@ class Settings:
     MQTT_BASE_TOPIC: str = os.getenv("MQTT_BASE_TOPIC", "live-video-alerts")
 
     SNAPSHOT_DIR: str = os.getenv("SNAPSHOT_DIR", "snapshots")
-
     MCP_ENABLED: bool = _bool("MCP_ENABLED", True)
     MCP_CONFIG_FILE: str = os.getenv("MCP_CONFIG_FILE", "resources/mcp_servers.json")
+
+     # Metrics Config
+    METRICS_SERVICE_URL: str = os.getenv("METRICS_SERVICE_URL", "ws://localhost:9090")
+    METRICS_NODEPORT: int = int(os.getenv("METRICS_NODEPORT", 9090))
 
 
 settings = Settings()

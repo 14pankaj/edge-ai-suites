@@ -15,7 +15,7 @@ import cv2
 import psutil
 from fastapi import Body, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -326,7 +326,7 @@ async def get_streams():
     return JSONResponse(content={"streams": result})
 
 
-@app.post("/streams", response_model=StreamResponse, tags=["Streams"])
+@app.post("/streams", tags=["Streams"])
 async def add_stream(
     data: StreamAddRequest = Body(...),
 ):
@@ -336,10 +336,14 @@ async def add_stream(
     if stream_id in mgr.streams:
         raise HTTPException(status_code=409, detail=f"Stream '{stream_id}' already exists")
     mgr.add_stream(stream_id, data.url, name=data.name, tools=data.tools, alerts=data.alerts)
-    return StreamResponse(status="added", stream_id=stream_id)
+    return JSONResponse(content={
+        "status": "added",
+        "stream_id": stream_id,
+        "name": data.name,
+    })
 
 
-@app.delete("/streams/{stream_id}", response_model=StreamResponse, tags=["Streams"])
+@app.delete("/streams/{stream_id}", tags=["Streams"])
 async def remove_stream(
     stream_id: str,
 ):
@@ -347,8 +351,13 @@ async def remove_stream(
     mgr = _require_manager()
     if stream_id not in mgr.streams:
         raise HTTPException(status_code=404, detail=f"Stream '{stream_id}' not found")
+    stream_name = mgr.stream_names.get(stream_id, "")
     mgr.remove_stream(stream_id)
-    return StreamResponse(status="removed", stream_id=stream_id)
+    return JSONResponse(content={
+        "status": "removed",
+        "stream_id": stream_id,
+        "name": stream_name,
+    })
 
 
 @app.patch("/streams/{stream_id}", tags=["Streams"])
@@ -578,6 +587,11 @@ async def invoke_mcp_tool(
             duration_ms=round(duration_ms, 1),
         )
 
+@app.get("/runtime-config.js")
+async def runtime_config():
+    payload = {"metricsPort": settings.METRICS_NODEPORT}
+    body = f"window.RUNTIME_CONFIG = {json.dumps(payload)};"
+    return Response(content=body, media_type="application/javascript")
 
 @app.get("/", response_class=HTMLResponse, tags=["UI"])
 async def read_root():
