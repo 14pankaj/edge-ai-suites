@@ -101,7 +101,7 @@ class MCPServer:
             [self.config.command, *self.config.args],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             env=env,
         )
         logger.info(f"[{self.name}] Connected (stdio)")
@@ -207,6 +207,7 @@ class MCPServer:
                 self._process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self._process.kill()
+                self._process.wait()
             self._process = None
         logger.info(f"[{self.name}] Disconnected")
 
