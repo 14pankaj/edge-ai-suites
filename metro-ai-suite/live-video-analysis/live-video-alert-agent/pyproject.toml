@@ -30,6 +30,9 @@ dependencies = [
 
     # System metrics
     "psutil>=5.9.0",
+
+    #MCP
+    "fastmcp==3.2.4"
 ]
 
 [tool.uv]

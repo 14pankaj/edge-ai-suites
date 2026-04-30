@@ -37,6 +37,11 @@ class AlertStateManager:
         """Clear all runtime state (e.g. after alert config changes)."""
         self._state.clear()
 
+    def reset_alert(self, alert_name: str):
+        """Clear runtime state for a specific alert across all streams."""
+        for stream_state in self._state.values():
+            stream_state.pop(alert_name, None)
+
     # ------------------------------------------------------------------ #
     # Core processing
     # ------------------------------------------------------------------ #
