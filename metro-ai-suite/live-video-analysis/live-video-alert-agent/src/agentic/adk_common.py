@@ -49,7 +49,7 @@ def create_adk_model():
     os.environ.setdefault("LITELLM_PROXY_API_BASE", settings.LLM_URL)
     LiteLlm.use_litellm_proxy = True
 
-    model = LiteLlm(model=f"litellm_proxy/{settings.LLM_MODEL}")
+    model = LiteLlm(model=f"litellm_proxy/{settings.LLM_MODEL}", tool_choice="auto")
     logger.debug(
         f"Created ADK model (url={settings.LLM_URL} "
         f"model={settings.LLM_MODEL})"

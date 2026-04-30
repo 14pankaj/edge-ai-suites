@@ -633,10 +633,11 @@ class AgentManager:
                     "timestamp": datetime.now(tz=timezone.utc).isoformat(),
                 }))
 
-            stream_allowed = self.stream_tools.get(stream_id)
+            stream_tools = self.stream_tools.get(stream_id) or []
             effective_tools = list(alert_cfg.tools)
-            if stream_allowed is not None:
-                effective_tools = [t for t in effective_tools if t in stream_allowed]
+            for t in stream_tools:
+                if t not in effective_tools:
+                    effective_tools.append(t)
             if "log_alert" not in effective_tools:
                 effective_tools.insert(0, "log_alert")
 

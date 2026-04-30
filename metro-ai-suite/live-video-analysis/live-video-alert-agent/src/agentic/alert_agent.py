@@ -493,7 +493,7 @@ class AlertActionAgent:
                 f"\nPlease handle this alert appropriately."
             )
 
-            _, invoked_tools = await run_agent_prompt(
+            text_response, invoked_tools = await run_agent_prompt(
                 runner=self._adk_runner,
                 session_service=self._session_service,
                 session_id=session_id,
@@ -502,11 +502,32 @@ class AlertActionAgent:
                 known_sessions=self._known_sessions,
             )
 
+            if invoked_tools:
+                logger.info(
+                    f"ADK agent invoked tools for [{stream_id}][{alert_cfg.name}]: "
+                    f"{invoked_tools}"
+                )
+                return invoked_tools
+
+            all_tools, _ = get_all_tools()
+            tool_names = list(alert_cfg.tools)
+            if text_response:
+                for name in all_tools:
+                    if name not in tool_names and name in text_response:
+                        tool_names.append(name)
+            if escalated and alert_cfg.escalation:
+                for t in alert_cfg.escalation.additional_tools:
+                    if t not in tool_names:
+                        tool_names.append(t)
+
             logger.info(
-                f"ADK agent invoked tools for [{stream_id}][{alert_cfg.name}]: "
-                f"{invoked_tools}"
+                f"ADK model returned no tool_calls for [{stream_id}][{alert_cfg.name}] "
+                f"— executing configured tools: {tool_names}"
             )
-            return invoked_tools
+            return await self._execute_tool_list(
+                tool_names, stream_id, alert_cfg, answer, reason,
+                consecutive_count, escalated, snapshot_path,
+            )
 
         except asyncio.TimeoutError:
             logger.error(

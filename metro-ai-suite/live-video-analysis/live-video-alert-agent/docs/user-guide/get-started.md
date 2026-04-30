@@ -55,14 +55,15 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
 
    *Option A — Google ADK with local OVMS (default, fully offline):*
    ```bash
-   export USE_ADK=true   # this is the default
-   export COMPOSE_PROFILES=$([[ "${USE_ADK}" == "true" ]] && echo "adk-llm" || echo "") #So if USE_ADK changes this env get updated as well
+   export USE_ADK=true
+   export COMPOSE_PROFILES=adk-llm
    export LLM_MODEL=Phi-4-mini-instruct-int4-ov
    ```
 
    *Option B — Rule-based (no LLM needed):*
    ```bash
    export USE_ADK=false
+   export COMPOSE_PROFILES=[]
    ```
 
    **Action tools** (configure the ones you want active):
