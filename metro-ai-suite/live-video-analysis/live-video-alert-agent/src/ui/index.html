@@ -103,50 +103,6 @@
                 </button>
             </div>
 
-            <!-- System Status / Metrics -->
-            <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-                <div class="flex items-center gap-1.5 mb-3">
-                    <div class="relative flex h-1.5 w-1.5">
-                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                    </div>
-                    <h3 class="text-[9px] font-bold text-slate-700 uppercase tracking-widest">System Health</h3>
-                </div>
-                
-                <div class="grid grid-cols-2 gap-2 mb-3">
-                    <div class="text-center p-1.5 bg-slate-50 rounded border border-slate-100">
-                        <span class="block text-lg font-semibold text-slate-700 leading-none mb-0.5" id="stream-count">0</span>
-                        <span class="text-[8px] text-slate-400 font-bold uppercase tracking-wide">Streams</span>
-                    </div>
-                    <div class="text-center p-1.5 bg-slate-50 rounded border border-slate-100 flex flex-col justify-center">
-                        <span class="block text-[9px] font-mono text-slate-600 leading-none mb-0.5" id="timestamp">--:--:--</span>
-                        <span class="text-[8px] text-slate-400 font-bold uppercase tracking-wide">Last Sync</span>
-                    </div>
-                </div>
-                
-                <!-- System Metrics Placeholder -->
-                <div class="pt-1 space-y-2">
-                    <div>
-                        <div class="flex justify-between text-[9px] mb-1">
-                            <span class="text-slate-500 font-semibold">CPU</span>
-                            <span id="cpu-val" class="font-mono text-slate-600 font-medium">--%</span>
-                        </div>
-                        <div class="w-full bg-slate-100 rounded-full h-1 overflow-hidden">
-                            <div id="cpu-bar" class="bg-blue-500 h-1 rounded-full transition-all duration-500" style="width: 0%"></div>
-                        </div>
-                    </div>
-                    <div>
-                        <div class="flex justify-between text-[9px] mb-1">
-                            <span class="text-slate-500 font-semibold">Mem</span>
-                            <span id="mem-val" class="font-mono text-slate-600 font-medium">--%</span>
-                        </div>
-                        <div class="w-full bg-slate-100 rounded-full h-1 overflow-hidden">
-                            <div id="mem-bar" class="bg-purple-500 h-1 rounded-full transition-all duration-500" style="width: 0%"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
         </aside>
         
         <!-- Resizer Handle -->

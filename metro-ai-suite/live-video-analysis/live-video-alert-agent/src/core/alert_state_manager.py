@@ -80,7 +80,11 @@ class AlertStateManager:
                 state.last_transition_ts = now
             state.last_answer = "YES"  # type: ignore[assignment]
         else:
-            state.consecutive_no += 1
+            # Only track consecutive NOs while in an active (YES) alert state
+            if state.last_answer == "YES":
+                state.consecutive_no += 1
+            else:
+                state.consecutive_no = 0
             if state.consecutive_no >= _NO_CONFIRM_LIMIT:
                 # Confirmed clear: require N consecutive NOs before flipping
                 state.consecutive_yes = 0

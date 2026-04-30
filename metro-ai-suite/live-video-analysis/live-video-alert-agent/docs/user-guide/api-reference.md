@@ -13,7 +13,7 @@ Liveness probe. Always returns `200` if the application process is alive.
   {
     "status": "healthy",
     "streams_active": 2,
-    "agents_enabled": 3,
+    "alerts_enabled": 3,
     "vlm_reachable": true,
     "uptime_seconds": 342.1,
     "timestamp": "2026-03-12T10:00:00Z"

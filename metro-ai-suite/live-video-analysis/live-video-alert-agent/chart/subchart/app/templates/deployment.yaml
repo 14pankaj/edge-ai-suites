@@ -117,6 +117,10 @@ spec:
               value: {{ .Values.mqttBaseTopic | quote }}
             - name: MCP_ENABLED
               value: {{ .Values.mcpEnabled | quote }}
+            {{- if .Values.mcpEnabled }}
+            - name: MCP_CONFIG_FILE
+              value: "/app/resources/mcp_servers.json"
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.port }}
@@ -154,6 +158,12 @@ spec:
           volumeMounts:
             - name: collector-signals
               mountPath: /app/shared/collector-signals
+            {{- if .Values.mcpEnabled }}
+            - name: mcp-config
+              mountPath: /app/resources/mcp_servers.json
+              subPath: mcp_servers.json
+              readOnly: true
+            {{- end }}
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -163,6 +173,11 @@ spec:
           hostPath:
             path: {{ .Values.collectorSignalsPath }}
             type: DirectoryOrCreate
+        {{- if .Values.mcpEnabled }}
+        - name: mcp-config
+          configMap:
+            name: {{ include "app.fullname" . }}-mcp
+        {{- end }}
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

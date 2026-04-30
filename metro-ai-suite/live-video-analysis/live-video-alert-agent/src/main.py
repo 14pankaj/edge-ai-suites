@@ -1,7 +1,6 @@
 # Copyright (C) 2025 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-import cv2
 import asyncio
 import json
 import logging
@@ -58,6 +57,8 @@ async def lifespan(app: FastAPI):
     )
 
     # Initialize MCP servers if enabled
+    mcp_tools = []
+    mcp_schemas = []
     if settings.MCP_ENABLED:
         logger.info("Initializing MCP servers...")
         mcp_tools, mcp_schemas = await initialize_mcp_servers()
@@ -151,7 +152,7 @@ async def health():
     return HealthResponse(
         status="healthy",
         streams_active=len(mgr.streams) if mgr else 0,
-        agents_enabled=sum(1 for a in mgr.alerts if a.enabled) if mgr else 0,
+        alerts_enabled=sum(1 for a in mgr.alerts if a.enabled) if mgr else 0,
         vlm_reachable=True,   # TODO: could ping OVMS /v1/config
         uptime_seconds=time.monotonic() - _startup_time,
         timestamp=datetime.now(tz=timezone.utc),

@@ -69,8 +69,8 @@ class StreamStatus(BaseModel):
     fps: Optional[float] = None
     resolution: Optional[str] = None
     buffer_fill: int = 0
-    tools: List[str] = []
-    alerts: List[str] = []
+    tools: List[str] = Field(default_factory=list)
+    alerts: List[str] = Field(default_factory=list)
 
 
 class StreamPatchRequest(BaseModel):
@@ -80,7 +80,7 @@ class StreamPatchRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["healthy", "degraded", "unhealthy"]
     streams_active: int
-    agents_enabled: int
+    alerts_enabled: int
     vlm_reachable: bool
     uptime_seconds: float
     timestamp: datetime

@@ -2,8 +2,6 @@
  * Agentic Alert NVR Dashboard
  */
 
-const timestamp = document.getElementById('timestamp');
-const streamCount = document.getElementById('stream-count');
 
 let activeStreams = [];
 let streamMetadata = {};
@@ -88,7 +86,6 @@ function initSSE() {
             
             if (data.streams && JSON.stringify(data.streams.sort()) !== JSON.stringify(activeStreams.sort())) {
                 activeStreams = data.streams;
-                streamCount.textContent = activeStreams.length;
                 renderGrid();
                 renderStreamList();
             }
@@ -106,7 +103,6 @@ function initSSE() {
             const data = JSON.parse(e.data);
             const { stream_id, results } = data;
             
-            timestamp.textContent = new Date().toLocaleTimeString();
             updateStreamResult(stream_id, results);
         } catch (err) {
             console.error('[SSE] Analysis parse error:', err);
@@ -184,8 +180,6 @@ function refreshAllResults() {
 }
 
 function updateAllResults(allResults) {
-    timestamp.textContent = new Date().toLocaleTimeString();
-    
     activeStreams.forEach(id => {
         const streamData = allResults[id];
         if (streamData) {
@@ -480,7 +474,6 @@ async function loadStreams() {
                 cardStates[s.stream_id] = (a && a.length === 1) ? a[0] : '__ALL__';
             }
         });
-        streamCount.textContent = activeStreams.length;
         renderGrid();
         renderStreamList();
     } catch(e) { console.error("Error loading streams", e); }
@@ -529,7 +522,6 @@ async function deleteStream(id) {
     const idx = activeStreams.indexOf(id);
     if (idx > -1) {
         activeStreams.splice(idx, 1);
-        streamCount.textContent = activeStreams.length;
         renderGrid();
         renderStreamList();
     }
@@ -687,8 +679,6 @@ async function fetchData() {
     try {
         const response = await fetch('/data');
         const json = await response.json();
-
-        timestamp.textContent = new Date().toLocaleTimeString();
 
         // Update each stream's result area using the shared render function
         activeStreams.forEach(id => {
@@ -919,11 +909,6 @@ function processMetrics(metrics) {
                     cpuVal = cpuUsage;
                     const cpuEl = document.getElementById('metrics-cpu-val');
                     if (cpuEl) cpuEl.textContent = cpuUsage.toFixed(1) + '%';
-                    // Sidebar
-                    const sidebarCpuVal = document.getElementById('cpu-val');
-                    const sidebarCpuBar = document.getElementById('cpu-bar');
-                    if (sidebarCpuVal) sidebarCpuVal.textContent = cpuUsage.toFixed(1) + '%';
-                    if (sidebarCpuBar) sidebarCpuBar.style.width = cpuUsage + '%';
                 }
                 break;
             case 'gpu_engine_usage':
@@ -948,11 +933,6 @@ function processMetrics(metrics) {
                     memVal = parseFloat(memPercent);
                     const memEl = document.getElementById('metrics-mem-val');
                     if (memEl) memEl.textContent = memVal.toFixed(1) + '%';
-                    // Sidebar
-                    const sidebarMemVal = document.getElementById('mem-val');
-                    const sidebarMemBar = document.getElementById('mem-bar');
-                    if (sidebarMemVal) sidebarMemVal.textContent = memVal.toFixed(1) + '%';
-                    if (sidebarMemBar) sidebarMemBar.style.width = memPercent + '%';
                 }
                 break;
         }

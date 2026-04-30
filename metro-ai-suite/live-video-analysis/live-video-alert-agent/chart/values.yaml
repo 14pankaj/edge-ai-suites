@@ -129,6 +129,20 @@ app:
   mqttBaseTopic: "alerts/live-video"
   # MCP integration
   mcpEnabled: true
+  # MCP server configuration (JSON content mounted as /app/resources/mcp_servers.json)
+  mcpServersConfig: |
+    {
+      "servers": [
+        {
+          "name": "prometheus",
+          "enabled": false,
+          "transport": "http",
+          "url": "<mcp_server_url>/mcp",
+          "description": "Prometheus MCP Server - query metrics, get alerts, analyze system performance",
+          "timeout": 30.0
+        }
+      ]
+    }
   # Host path for collector-signals — must match collector.collectorSignalsPath
   collectorSignalsPath: /opt/lva/collector-signals
 
