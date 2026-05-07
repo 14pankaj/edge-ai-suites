@@ -280,6 +280,12 @@ class AgentManager:
             logger.warning(f"Stream '{stream_id}' already registered — ignoring")
             return
 
+        if len(self.streams) >= settings.MAX_STREAMS:
+            raise ValueError(
+                f"Maximum number of streams ({settings.MAX_STREAMS}) reached. "
+                f"Remove a stream before adding a new one."
+            )
+
         mgr = LiveStreamManager(rtsp_url)
         self.streams[stream_id] = mgr
         self.latest_results[stream_id] = {}
@@ -968,6 +974,12 @@ class AgentManager:
             try:
                 with open(path) as fh:
                     streams = json.load(fh)
+                if len(streams) > settings.MAX_STREAMS:
+                    logger.warning(
+                        f"Stream config has {len(streams)} streams but MAX_STREAMS={settings.MAX_STREAMS} "
+                        f"— loading only the first {settings.MAX_STREAMS}"
+                    )
+                    streams = streams[:settings.MAX_STREAMS]
                 for s in streams:
                     self.add_stream(
                         s["id"], s["url"],

@@ -43,6 +43,7 @@ class Settings:
 
     ACTION_WORKERS: int = _int("ACTION_WORKERS", 2)
 
+    MAX_STREAMS: int = _int("MAX_STREAMS", 4)
     ANALYSIS_INTERVAL: float = _float("ANALYSIS_INTERVAL", 2.0)
     FRAME_BUFFER_SIZE: int = _int("FRAME_BUFFER_SIZE", 3)
     CAPTURE_FPS: float = _float("CAPTURE_FPS", 5)  # frames decoded per second

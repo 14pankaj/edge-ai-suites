@@ -336,7 +336,10 @@ async def add_stream(
     stream_id = data.resolve_id()
     if stream_id in mgr.streams:
         raise HTTPException(status_code=409, detail=f"Stream '{stream_id}' already exists")
-    mgr.add_stream(stream_id, data.url, name=data.name, tools=data.tools, alerts=data.alerts)
+    try:
+        mgr.add_stream(stream_id, data.url, name=data.name, tools=data.tools, alerts=data.alerts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return JSONResponse(content={
         "status": "added",
         "stream_id": stream_id,
