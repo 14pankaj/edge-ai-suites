@@ -52,7 +52,6 @@ ovms --pull \
     --max_num_batched_tokens 2048 \
     --max_num_seqs 16 \
     --kv_cache_precision u8 \
-    --model_distribution_policy TENSOR_PARALLEL \
     --plugin_config '{"DYNAMIC_QUANTIZATION_GROUP_SIZE":"32","NUM_STREAMS":"2"}'
 echo "[init] VLM pull complete"
 VLM_PATH="${REPO}/${VLM_REPO}"

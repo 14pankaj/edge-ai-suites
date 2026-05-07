@@ -33,13 +33,13 @@ class Settings:
     RTSP_URL: str = os.getenv("RTSP_URL", "")
     VLM_URL: str = os.getenv("VLM_URL", "http://ovms-vlm:8000/v3")
     MODEL_NAME: str = os.getenv("MODEL_NAME", "Phi-3.5-vision")
-    VLM_IMAGE_MAX_DIM: int = _int("VLM_IMAGE_MAX_DIM", 768)
+    VLM_IMAGE_MAX_DIM: int = _int("VLM_IMAGE_MAX_DIM", 512)
     VLM_JPEG_QUALITY: int = _int("VLM_JPEG_QUALITY", 80)
-    VLM_TIMEOUT: float = _float("VLM_TIMEOUT", 15.0)
+    VLM_TIMEOUT: float = _float("VLM_TIMEOUT", 30)
     VLM_MAX_RETRIES: int = _int("VLM_MAX_RETRIES", 1)
     VLM_MAX_TOKENS: int = _int("VLM_MAX_TOKENS", 256)
-    VLM_MAX_CONCURRENCY: int = _int("VLM_MAX_CONCURRENCY", 16)
-    VLM_ALERTS_PER_CALL: int = _int("VLM_ALERTS_PER_CALL", 8)  # max alerts batched per VLM call
+    VLM_MAX_CONCURRENCY: int = _int("VLM_MAX_CONCURRENCY", 8)
+    VLM_ALERTS_PER_CALL: int = _int("VLM_ALERTS_PER_CALL", 4)  # max alerts batched per VLM call
 
     ACTION_WORKERS: int = _int("ACTION_WORKERS", 4)
 
