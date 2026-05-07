@@ -33,19 +33,19 @@ class Settings:
     RTSP_URL: str = os.getenv("RTSP_URL", "")
     VLM_URL: str = os.getenv("VLM_URL", "http://ovms-vlm:8000/v3")
     MODEL_NAME: str = os.getenv("MODEL_NAME", "Phi-3.5-vision")
-    VLM_IMAGE_MAX_DIM: int = _int("VLM_IMAGE_MAX_DIM", 512)
-    VLM_JPEG_QUALITY: int = _int("VLM_JPEG_QUALITY", 80)
-    VLM_TIMEOUT: float = _float("VLM_TIMEOUT", 30)
+    VLM_IMAGE_MAX_DIM: int = _int("VLM_IMAGE_MAX_DIM", 224)
+    VLM_JPEG_QUALITY: int = _int("VLM_JPEG_QUALITY", 65)
+    VLM_TIMEOUT: float = _float("VLM_TIMEOUT", 30.0)
     VLM_MAX_RETRIES: int = _int("VLM_MAX_RETRIES", 1)
-    VLM_MAX_TOKENS: int = _int("VLM_MAX_TOKENS", 256)
-    VLM_MAX_CONCURRENCY: int = _int("VLM_MAX_CONCURRENCY", 8)
-    VLM_ALERTS_PER_CALL: int = _int("VLM_ALERTS_PER_CALL", 4)  # max alerts batched per VLM call
+    VLM_MAX_TOKENS: int = _int("VLM_MAX_TOKENS", 128)
+    VLM_MAX_CONCURRENCY: int = _int("VLM_MAX_CONCURRENCY", 1)
+    VLM_ALERTS_PER_CALL: int = _int("VLM_ALERTS_PER_CALL", 1)  # max alerts batched per VLM call
 
-    ACTION_WORKERS: int = _int("ACTION_WORKERS", 4)
+    ACTION_WORKERS: int = _int("ACTION_WORKERS", 2)
 
-    ANALYSIS_INTERVAL: float = _float("ANALYSIS_INTERVAL", 1.0)
-    FRAME_BUFFER_SIZE: int = _int("FRAME_BUFFER_SIZE",10)
-    CAPTURE_FPS: float = _float("CAPTURE_FPS", 10)  # frames decoded per second
+    ANALYSIS_INTERVAL: float = _float("ANALYSIS_INTERVAL", 2.0)
+    FRAME_BUFFER_SIZE: int = _int("FRAME_BUFFER_SIZE", 3)
+    CAPTURE_FPS: float = _float("CAPTURE_FPS", 5)  # frames decoded per second
     CAPTURE_RESIZE_HEIGHT: int = _int("CAPTURE_RESIZE_HEIGHT", 0)  # 0 = skip; VLM client resizes
     
     USE_ADK: bool = _bool("USE_ADK", True)

@@ -213,6 +213,7 @@ class AgentManager:
         self.stream_names: Dict[str, str] = {}
         self._pipelines: Dict[str, StreamPipeline] = {}
         self._stop_event: asyncio.Event = asyncio.Event()
+        self._alerts_changed: asyncio.Event = asyncio.Event()
 
         self.running = False
         self._start_time: Optional[float] = None
@@ -380,6 +381,9 @@ class AgentManager:
         self.latest_results.clear()
         self._pipelines.clear()  # force pipeline recreation with new alerts
 
+        # Wake all analysis loops so they immediately run with updated prompts
+        self._alerts_changed.set()
+
         # Drain stale action-queue jobs that belong to changed alerts.
         if changed_alert_names:
             kept: list = []
@@ -479,12 +483,21 @@ class AgentManager:
 
         while self.running and stream_id in self.streams:
             t_start = time.monotonic()
+            self._alerts_changed.clear()
             await self._analyse_one_stream(stream_id)
 
             elapsed = time.monotonic() - t_start
             interval = settings.ANALYSIS_INTERVAL
             sleep_time = max(0, interval - elapsed)
-            await asyncio.sleep(sleep_time)
+            if sleep_time > 0:
+                # Wake immediately if alerts are updated during the sleep
+                try:
+                    await asyncio.wait_for(
+                        self._alerts_changed.wait(), timeout=sleep_time
+                    )
+                    logger.debug(f"[{stream_id}] Alert config changed — skipping sleep")
+                except asyncio.TimeoutError:
+                    pass
 
         logger.info(f"Analysis loop exited for stream '{stream_id}'")
 

@@ -91,6 +91,7 @@ services:
       - HTTP_PROXY=${http_proxy}
       - https_proxy=${https_proxy}
       - HTTPS_PROXY=${https_proxy}
+      - TARGET_DEVICE=${TARGET_DEVICE:-CPU}
     volumes:
       - ovms-models:/models
     ulimits:
