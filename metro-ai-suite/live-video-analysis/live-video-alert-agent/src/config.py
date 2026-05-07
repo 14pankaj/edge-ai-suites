@@ -34,10 +34,10 @@ class Settings:
     VLM_URL: str = os.getenv("VLM_URL", "http://ovms-vlm:8000/v3")
     MODEL_NAME: str = os.getenv("MODEL_NAME", "Phi-3.5-vision")
     VLM_IMAGE_MAX_DIM: int = _int("VLM_IMAGE_MAX_DIM", 224)
-    VLM_JPEG_QUALITY: int = _int("VLM_JPEG_QUALITY", 65)
+    VLM_JPEG_QUALITY: int = _int("VLM_JPEG_QUALITY", 60)
     VLM_TIMEOUT: float = _float("VLM_TIMEOUT", 30.0)
     VLM_MAX_RETRIES: int = _int("VLM_MAX_RETRIES", 1)
-    VLM_MAX_TOKENS: int = _int("VLM_MAX_TOKENS", 128)
+    VLM_MAX_TOKENS: int = _int("VLM_MAX_TOKENS", 64)
     VLM_MAX_CONCURRENCY: int = _int("VLM_MAX_CONCURRENCY", 1)
     VLM_ALERTS_PER_CALL: int = _int("VLM_ALERTS_PER_CALL", 1)  # max alerts batched per VLM call
 
