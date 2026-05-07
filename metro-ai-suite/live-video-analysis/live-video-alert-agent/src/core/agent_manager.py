@@ -46,7 +46,7 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 _RESOURCES = Path("resources")
-_MAX_FRAME_AGE = 1.0  # seconds — skip analysis if newest frame is older than this
+_MAX_FRAME_AGE = 10.0  # seconds — skip analysis if newest frame is older than this
 
 
 def _safe_broadcast(coro):

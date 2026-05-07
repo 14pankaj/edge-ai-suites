@@ -202,7 +202,7 @@ class AlertActionAgent:
         # Per-stream call counters for periodic session reset
         self._stream_call_counts: Dict[str, int] = {}
         # Max calls per stream session before context is reset
-        self._max_session_calls: int = 20
+        self._max_session_calls: int = 5
 
         if self._use_adk:
             self._init_adk()
