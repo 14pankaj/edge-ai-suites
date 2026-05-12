@@ -42,7 +42,6 @@ Configure via environment variables:
 
 ```bash
 export OVMS_SOURCE_MODEL=OpenVINO/InternVL2-2B-int4-ov
-export MODEL_NAME=InternVL2-2B
 ```
 
 The user is expected to acknowledge the licensing terms and conditions before selecting the model.
