@@ -16,11 +16,11 @@ set -euo pipefail
 
 VLM_REPO="${VLM_REPO}"
 VLM_NAME="${VLM_REPO#*/}"
-VLM_DEVICE="${VLM_TARGET_DEVICE:-${OVMS_TARGET_DEVICE:-CPU}}"
+VLM_DEVICE="${VLM_TARGET_DEVICE:-${OVMS_TARGET_DEVICE:-GPU}}"
 USE_ADK="${USE_ADK:-true}"
 LLM_REPO="${LLM_REPO}"
 LLM_NAME="${LLM_REPO#*/}"
-LLM_DEVICE="${LLM_TARGET_DEVICE:-${OVMS_TARGET_DEVICE:-CPU}}"
+LLM_DEVICE="${LLM_TARGET_DEVICE:-${OVMS_TARGET_DEVICE:-GPU}}"
 
 REPO="/models"
 
@@ -52,7 +52,9 @@ ovms --pull \
     --max_num_batched_tokens 2048 \
     --max_num_seqs 16 \
     --kv_cache_precision u8 \
-    --plugin_config '{"DYNAMIC_QUANTIZATION_GROUP_SIZE":"32","NUM_STREAMS":"2"}'
+    --plugin_config '{"DYNAMIC_QUANTIZATION_GROUP_SIZE":"32","NUM_STREAMS":"2"}' \
+    --precision FP16  \
+    --layout "NCHW"
 echo "[init] VLM pull complete"
 VLM_PATH="${REPO}/${VLM_REPO}"
 
@@ -86,7 +88,9 @@ if [[ "${USE_ADK}" == "true" ]]; then
         --max_num_batched_tokens 1024 \
         --max_num_seqs 8 \
         --kv_cache_precision u8 \
-        --plugin_config '{"DYNAMIC_QUANTIZATION_GROUP_SIZE":"32","NUM_STREAMS":"2"}'
+        --plugin_config '{"DYNAMIC_QUANTIZATION_GROUP_SIZE":"32","NUM_STREAMS":"2"}' \
+        --precision FP16 \
+        --layout "NCHW"
     echo "[init] LLM pull complete"
     
     LLM_PATH="${REPO}/${LLM_REPO}"

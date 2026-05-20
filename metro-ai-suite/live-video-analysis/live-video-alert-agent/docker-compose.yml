@@ -20,6 +20,7 @@ services:
       - LLM_REPO=${LLM_MODEL:-OpenVINO/Phi-4-mini-instruct-int4-ov}
       - VLM_TARGET_DEVICE=${VLM_TARGET_DEVICE:-${OVMS_TARGET_DEVICE:-CPU}}
       - LLM_TARGET_DEVICE=${LLM_TARGET_DEVICE:-${OVMS_TARGET_DEVICE:-CPU}}
+      - MODEL_PRECISION=FP16
     volumes:
       - ovms-models:/models
       - ./scripts/init_ovms.sh:/init_ovms.sh:ro
@@ -44,6 +45,7 @@ services:
       - https_proxy=${https_proxy}
       - HTTPS_PROXY=${https_proxy}
       - TARGET_DEVICE=${VLM_TARGET_DEVICE:-CPU}
+      - OMP_NUM_THREADS=4
     volumes:
       - ovms-models:/models
     ulimits:
@@ -71,8 +73,6 @@ services:
   ovms-llm:
     image: openvino/model_server:2026.1-gpu
     container_name: ovms-llm
-    profiles:
-      - adk-llm
     restart: unless-stopped
     depends_on:
       ovms-download:
@@ -87,6 +87,7 @@ services:
       - https_proxy=${https_proxy}
       - HTTPS_PROXY=${https_proxy}
       - TARGET_DEVICE=${LLM_TARGET_DEVICE:-CPU}
+      - OMP_NUM_THREADS=4
     volumes:
       - ovms-models:/models
     ulimits:
