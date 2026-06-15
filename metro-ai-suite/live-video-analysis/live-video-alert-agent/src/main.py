@@ -154,6 +154,7 @@ async def health():
         streams_active=len(mgr.streams) if mgr else 0,
         alerts_enabled=sum(1 for a in mgr.alerts if a.enabled) if mgr else 0,
         vlm_reachable=True,   # TODO: could ping OVMS /v1/config
+        inference_device=settings.OVMS_TARGET_DEVICE,
         uptime_seconds=time.monotonic() - _startup_time,
         timestamp=datetime.now(tz=timezone.utc),
     )

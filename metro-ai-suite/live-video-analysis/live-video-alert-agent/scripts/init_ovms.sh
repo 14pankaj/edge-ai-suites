@@ -14,13 +14,48 @@
 
 set -euo pipefail
 
+# ------------------------------------------------------------------
+# Auto-detect GPU: if /dev/dri/renderD128 exists and no explicit device
+# was configured, default to GPU for better performance.
+# ------------------------------------------------------------------
+if [[ -z "${OVMS_TARGET_DEVICE:-}" ]] && [[ -e /dev/dri/renderD128 ]]; then
+    export OVMS_TARGET_DEVICE="GPU"
+    echo "[init] Auto-detected Intel GPU (/dev/dri/renderD128). Defaulting OVMS_TARGET_DEVICE=GPU"
+elif [[ -z "${OVMS_TARGET_DEVICE:-}" ]]; then
+    export OVMS_TARGET_DEVICE="CPU"
+    echo "[init] No GPU detected. Defaulting OVMS_TARGET_DEVICE=CPU"
+else
+    echo "[init] Using explicitly configured OVMS_TARGET_DEVICE=${OVMS_TARGET_DEVICE}"
+fi
+
 VLM_REPO="${VLM_REPO}"
 VLM_NAME="${VLM_REPO#*/}"
+<<<<<<< Updated upstream
 VLM_DEVICE="${VLM_TARGET_DEVICE:-${OVMS_TARGET_DEVICE:-GPU}}"
 USE_ADK="${USE_ADK:-true}"
 LLM_REPO="${LLM_REPO}"
 LLM_NAME="${LLM_REPO#*/}"
 LLM_DEVICE="${LLM_TARGET_DEVICE:-${OVMS_TARGET_DEVICE:-GPU}}"
+=======
+VLM_DEVICE="${VLM_TARGET_DEVICE:-${OVMS_TARGET_DEVICE}}"
+USE_ADK="${USE_ADK:-true}"
+LLM_REPO="${LLM_REPO}"
+LLM_NAME="${LLM_REPO#*/}"
+LLM_DEVICE="${LLM_TARGET_DEVICE:-${OVMS_TARGET_DEVICE}}"
+
+echo "[init] Device configuration: VLM=${VLM_DEVICE}, LLM=${LLM_DEVICE}"
+
+# ------------------------------------------------------------------
+# HuggingFace Token: only needed for gated models (e.g., Llama).
+# Default models (Phi-3.5-vision, Phi-4-mini) are public.
+# ------------------------------------------------------------------
+if [[ -n "${HF_TOKEN:-}" ]]; then
+    echo "[init] HF_TOKEN is set — authenticated model access enabled"
+else
+    echo "[init] HF_TOKEN not set — using public model access (sufficient for default models)"
+    unset HF_TOKEN 2>/dev/null || true
+fi
+>>>>>>> Stashed changes
 
 REPO="/models"
 

@@ -38,6 +38,8 @@ The application automatically downloads VLM models on first run (~2GB). The mode
 - `OpenVINO/Phi-3.5-vision-instruct-int4-ov`
 - `OpenVINO/InternVL2-2B-int4-ov`
 
+> **No HuggingFace token needed for public models.** Only set `HF_TOKEN` if you switch to a gated model (e.g., Llama-based models that require license acceptance).
+
 Configure these via environment variables:
 
 ```bash

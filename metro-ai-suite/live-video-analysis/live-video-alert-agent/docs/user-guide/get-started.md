@@ -29,8 +29,13 @@ This guide covers the rapid deployment of the Live Video Alert Agent system usin
    ```bash
    export REGISTRY="intel/"
    export TAG="latest"
-   export HF_TOKEN=<your-huggingface-token>
    ```
+
+   > **Note on HuggingFace Token:** is Optional for **public** models and as they do **not** require an HF token. Only set `HF_TOKEN` if you plan to use gated models (e.g., Llama-based models etc):
+   >
+   > ```bash
+   > export HF_TOKEN=<your-huggingface-token>   # Only needed for gated models
+   > ```
 
    Skip this step if you prefer to build the sample application from source. For detailed instructions, refer to [How to Build from Source](./get-started/build-from-source.md) guide for details.
 

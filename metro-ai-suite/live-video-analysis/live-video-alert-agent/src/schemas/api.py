@@ -82,6 +82,7 @@ class HealthResponse(BaseModel):
     streams_active: int
     alerts_enabled: int
     vlm_reachable: bool
+    inference_device: str = "GPU"
     uptime_seconds: float
     timestamp: datetime
 

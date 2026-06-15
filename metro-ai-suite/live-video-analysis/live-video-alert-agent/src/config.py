@@ -34,6 +34,7 @@ class Settings:
     VLM_URL: str = os.getenv("VLM_URL", "http://ovms-vlm:8000/v3")
     OVMS_SOURCE_MODEL: str = os.getenv("OVMS_SOURCE_MODEL", "OpenVINO/Phi-3.5-vision-instruct-int4-ov")
     MODEL_NAME: str =OVMS_SOURCE_MODEL.split("/")[-1]  # e.g. "Phi-3.5-vision-instruct-int4-ov"
+    OVMS_TARGET_DEVICE: str = os.getenv("OVMS_TARGET_DEVICE", "CPU")
     VLM_IMAGE_MAX_DIM: int = _int("VLM_IMAGE_MAX_DIM", 224)
     VLM_JPEG_QUALITY: int = _int("VLM_JPEG_QUALITY", 60)
     VLM_TIMEOUT: float = _float("VLM_TIMEOUT", 45.0)

@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadAvailableTools();
     await loadAlertConfig();
     await loadStreams();
+    await loadDeviceInfo();
 
     initSSE();
     initResizer();
@@ -414,6 +415,28 @@ function updateAllDropdowns() {
             }
         }
     });
+}
+
+
+async function loadDeviceInfo() {
+    try {
+        const res = await fetch('/health');
+        const data = await res.json();
+        if (data.inference_device) {
+            const badge = document.getElementById('device-badge');
+            const label = document.getElementById('device-label');
+            if (badge && label) {
+                label.textContent = data.inference_device;
+                badge.classList.remove('hidden');
+                if (data.inference_device === 'GPU') {
+                    badge.classList.remove('bg-slate-200', 'text-slate-600');
+                    badge.classList.add('bg-blue-100', 'text-blue-700');
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Could not load device info:", e);
+    }
 }
 
 
