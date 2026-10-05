@@ -23,7 +23,7 @@ show_help() {
     echo -e "  ${GREEN}source setup.sh --use-case <use-case-name> [--stop | --clean-data | config]${NC}"
     echo -e ""
     echo -e "${YELLOW}OPTIONS:${NC}"
-    echo -e "  ${BLUE}--use-case <name>${NC}    Use case to deploy (required). Example: pipeline-defect-detection"
+    echo -e "  ${BLUE}--use-case <name>${NC}    Use case to deploy (required). Examples: pipeline-defect-detection, gas-detection"
     echo -e "  ${BLUE}--stop${NC}               Bring down all running containers"
     echo -e "  ${BLUE}--clean-data${NC}         Bring down containers and remove all volumes"
     echo -e "  ${BLUE}config${NC}               Print resolved compose configuration without starting"
@@ -31,7 +31,7 @@ show_help() {
     echo -e ""
     echo -e "${YELLOW}EXAMPLES:${NC}"
     echo -e "  ${GRAY}source setup.sh --use-case pipeline-defect-detection"
-    echo -e "  source setup.sh --use-case weld-defect-detection"
+    echo -e "  source setup.sh --use-case gas-detection"
     echo -e "  source setup.sh --use-case pipeline-defect-detection --stop${NC}"
 }
 
@@ -83,7 +83,7 @@ remove_volumes() {
 }
 
 validate_env() {
-    # The env file ships inside the use-case directory (apps/<use-case>/.env_<use-case>),
+    # The env file ships inside the use-case directory (apps/<dir>/.env_<use-case>),
     # not at the project root.
     local env_file="${USE_CASE_DIR}/.env_${USE_CASE}"
     if [ ! -f "${env_file}" ]; then
@@ -258,21 +258,24 @@ fi
 
 # =================== Resolve use-case paths ======================
 if [ -n "${USE_CASE}" ]; then
-    # Look for the use-case in the current repo (eal) or sibling eas repo
+    # A use case is identified by its env file (apps/<dir>/.env_<use-case>);
+    # <dir> is usually the use-case name but may differ (e.g. use case
+    # "gas-detection" lives in apps/gas-detection-multimodal/).
     USE_CASE_DIR=""
-    CANDIDATE_DIRS=(
-        "${PWD}/apps/${USE_CASE}"
-    )
-    for dir in "${CANDIDATE_DIRS[@]}"; do
-        if [ -d "${dir}" ]; then
-            USE_CASE_DIR="${dir}"
-            break
-        fi
-    done
+    if [ -f "${PWD}/apps/${USE_CASE}/.env_${USE_CASE}" ]; then
+        USE_CASE_DIR="${PWD}/apps/${USE_CASE}"
+    else
+        for env_candidate in "${PWD}"/apps/*/.env_"${USE_CASE}"; do
+            if [ -f "${env_candidate}" ]; then
+                USE_CASE_DIR="$(dirname "${env_candidate}")"
+                break
+            fi
+        done
+    fi
 
     if [ -z "${USE_CASE_DIR}" ]; then
         echo -e "${RED}ERROR: Use case '${USE_CASE}' not found.${NC}" >&2
-        echo -e "${YELLOW}Expected directory: apps/${USE_CASE}/${NC}" >&2
+        echo -e "${YELLOW}Expected env file: apps/<dir>/.env_${USE_CASE}${NC}" >&2
         return 1 2>/dev/null || exit 1
     fi
     export USE_CASE_DIR

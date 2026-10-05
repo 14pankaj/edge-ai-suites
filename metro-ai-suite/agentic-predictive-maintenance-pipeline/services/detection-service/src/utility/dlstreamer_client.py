@@ -29,6 +29,19 @@ _DLSTREAMER_VIDEOS_PATH = os.environ.get(
 )
 _TIMEOUT = 5
 
+# DL Streamer Pipeline Server's own gvapipeline template uses "{auto_source}" in
+# place of a concrete GStreamer source element, which it only substitutes when
+# the start request includes a "source" field — it does NOT fall back to the
+# pipeline definition's own default "payload.source" from pipeline-server-config.json
+# when the request omits one. Callers that never pass a video_filename (e.g. the
+# gas-detection "Run Multimodal Detection" action, which has no video
+# picker and always starts the pipeline with video_filename=None) would otherwise
+# submit a request with no "source" at all, and DL Streamer rejects it with a
+# GStreamer parse error: "no element auto_source". Always fall back to this
+# filename (every use case's sample video, see
+# scripts/download_and_prep_data.py) so a "source" is always present.
+_DEFAULT_VIDEO_FILENAME = os.environ.get("DLSTREAMER_DEFAULT_VIDEO", "datastream.mp4")
+
 # Maps a UI-selectable device name to the pipeline definition that runs
 # gvadetect on that device (see configs/pipeline-server-config.json).
 _PIPELINE_NAME_BY_DEVICE = {
@@ -77,7 +90,9 @@ def _get_instance_status(instance_id: str) -> dict | None:
     return None
 
 
-def _start_pipeline(device: str = "CPU", video_filename: str | None = None) -> str:
+def _start_pipeline(
+    device: str = "CPU", video_filename: str | None = None, mqtt_topic: str | None = None
+) -> str:
     """Start a new pipeline instance. Returns the instance id, or raises PipelineRunError."""
     pipeline_name = _PIPELINE_NAME_BY_DEVICE.get(device.upper(), _PIPELINE_NAME) if device else _PIPELINE_NAME
 
@@ -85,15 +100,14 @@ def _start_pipeline(device: str = "CPU", video_filename: str | None = None) -> s
         "destination": {
             "metadata": {
                 "type": "mqtt",
-                "topic": _MQTT_TOPIC,
+                "topic": mqtt_topic or _MQTT_TOPIC,
             }
         }
     }
-    if video_filename:
-        payload["source"] = {
-            "uri": f"file://{_DLSTREAMER_VIDEOS_PATH}/{video_filename}",
-            "type": "uri",
-        }
+    payload["source"] = {
+        "uri": f"file://{_DLSTREAMER_VIDEOS_PATH}/{video_filename or _DEFAULT_VIDEO_FILENAME}",
+        "type": "uri",
+    }
 
     try:
         r = requests.post(
@@ -123,19 +137,24 @@ def run_pipeline_to_completion(
     video_filename: str | None = None,
     poll_interval: float = 2.0,
     timeout: float = 600.0,
+    mqtt_topic: str | None = None,
 ) -> dict:
     """Start the pipeline and block until it reaches a terminal state.
 
     ``device`` selects which pipeline definition (CPU/GPU/NPU) to run.
     ``video_filename`` optionally overrides the source video, relative to the
     shared resources/videos directory; when omitted, the pipeline's own
-    default source (datastream.mp4) is used.
+    default source (datastream.mp4) is used. ``mqtt_topic`` optionally
+    overrides the topic detections are published to (defaults to
+    ``MQTT_TOPIC``/``apm/detections``) — used by callers that need a
+    dedicated, non-persisted topic (e.g. the gas-detection image-classification
+    branch, see ``dlstreamer_mqtt_collector.py``).
 
     Returns the final status dict (``{"id", "state", "avg_fps", "elapsed_time", ...}``).
     Raises ``PipelineRunError`` if the pipeline cannot be started, or times out
     without reaching a terminal state.
     """
-    instance_id = _start_pipeline(device=device, video_filename=video_filename)
+    instance_id = _start_pipeline(device=device, video_filename=video_filename, mqtt_topic=mqtt_topic)
 
     deadline = time.monotonic() + timeout
     last_status: dict | None = None

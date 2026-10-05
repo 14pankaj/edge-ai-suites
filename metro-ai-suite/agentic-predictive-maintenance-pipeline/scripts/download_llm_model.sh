@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Downloads and converts the LLM configured for a use case (LLM_MODEL_NAME in
-# apps/<use-case>/.env_<use-case>) to OpenVINO Model Server (OVMS) format using
+# apps/<dir>/.env_<use-case>) to OpenVINO Model Server (OVMS) format using
 # the model-download microservice (https://github.com/open-edge-platform/edge-ai-libraries/
 # tree/main/microservices/model-download), then writes the resulting local path
 # back into the use case's env file as LLM_MODEL_PATH so setup.sh can mount it
@@ -34,12 +34,12 @@ Usage:
   $(basename "$0") --use-case <use-case-name>
 
 Downloads and converts the LLM configured for <use-case> (via LLM_MODEL_NAME,
-LLM_DEVICE, LLM_WEIGHT_FORMAT in apps/<use-case>/.env_<use-case>) to OVMS
+LLM_DEVICE, LLM_WEIGHT_FORMAT in apps/<dir>/.env_<use-case>) to OVMS
 format using the model-download microservice, then writes LLM_MODEL_PATH back
 into that env file.
 
 Options:
-  --use-case <name>   Use case directory under apps/ (required)
+  --use-case <name>   Use case name, i.e. the <name> in apps/<dir>/.env_<name> (required)
   -h, --help          Show this help message
 EOF
 }
@@ -60,13 +60,25 @@ if [[ -z "${USE_CASE}" ]]; then
     exit 1
 fi
 
-USE_CASE_DIR="${ROOT_DIR}/apps/${USE_CASE}"
-ENV_FILE="${USE_CASE_DIR}/.env_${USE_CASE}"
-
+# A use case is identified by its env file (apps/<dir>/.env_<use-case>);
+# <dir> is usually the use-case name but may differ (e.g. use case
+# "gas-detection" lives in apps/gas-detection-multimodal/).
+ENV_FILE="${ROOT_DIR}/apps/${USE_CASE}/.env_${USE_CASE}"
 if [[ ! -f "${ENV_FILE}" ]]; then
-    err "Environment file not found: ${ENV_FILE}"
+    ENV_FILE=""
+    for env_candidate in "${ROOT_DIR}"/apps/*/.env_"${USE_CASE}"; do
+        if [[ -f "${env_candidate}" ]]; then
+            ENV_FILE="${env_candidate}"
+            break
+        fi
+    done
+fi
+
+if [[ -z "${ENV_FILE}" ]]; then
+    err "Environment file not found: apps/<dir>/.env_${USE_CASE}"
     exit 1
 fi
+USE_CASE_DIR="$(dirname "${ENV_FILE}")"
 
 # shellcheck disable=SC1090
 set -a

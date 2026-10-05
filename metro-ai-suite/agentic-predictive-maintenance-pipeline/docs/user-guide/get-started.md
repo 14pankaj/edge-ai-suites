@@ -56,7 +56,10 @@ agentic-predictive-maintenance/
 
 > **Note**: Each use case ships with its own `.env_<use-case>` file already populated
 > with working defaults at `apps/<use-case>/.env_<use-case>` — you do not need to create
-> it yourself; `setup.sh` reads it from that location automatically.
+> it yourself; `setup.sh` reads it from that location automatically. The folder name may
+> differ from the use-case name: `setup.sh` locates the use case by its
+> `apps/*/.env_<use-case>` file (for example, `--use-case gas-detection` resolves to
+> `apps/gas-detection-multimodal/.env_gas-detection`).
 
 ## Step 1 — Clone the Repository
 

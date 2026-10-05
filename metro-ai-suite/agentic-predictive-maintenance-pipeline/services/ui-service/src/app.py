@@ -41,7 +41,7 @@ _STORAGE_URL   = os.environ.get("STORAGE_SERVICE_URL",   "http://apm-storage:500
 _LLM_BASE_URL  = os.environ.get("LLM_BASE_URL",          "")
 _LLM_MODEL     = os.environ.get("LLM_MODEL_NAME",        "")
 _USE_CASE_ID   = os.environ.get("USE_CASE_ID",           "unknown")
-# Dataset+sensor (no live video) use cases, e.g. gas-detection-multimodal, set this to the
+# Dataset+sensor (no live video) use cases, e.g. gas-detection, set this to the
 # container-mounted config path (apps/<use-case>/configs/*.docker.json) to enable the
 # "Run Multimodal Detection" trigger in the UI. Left unset, the UI behaves exactly as before
 # (single "Run Inspection" video-pipeline trigger only).
@@ -1069,7 +1069,7 @@ async def trigger_multimodal_run(device: str = Form("CPU")):
     """Trigger a dataset+sensor multimodal detection run (image + sensor fusion).
 
     Only available/shown when ``MULTIMODAL_CONFIG_PATH`` is configured for this
-    use case (e.g. gas-detection-multimodal) — posts to the detection-service's
+    use case (e.g. gas-detection) — posts to the detection-service's
     ``/detection/run-multimodal`` endpoint instead of the video-pipeline
     ``/detection/run`` endpoint. Reasoning is picked up by the agent-service
     the same way as the video path, via the shared "batch-complete" MQTT event.

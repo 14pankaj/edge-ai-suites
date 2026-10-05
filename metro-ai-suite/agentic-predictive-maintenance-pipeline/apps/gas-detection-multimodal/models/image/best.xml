@@ -3132,10 +3132,23 @@
 			<is_python_object value="True" />
 		</conversion_parameters>
 		<model_info>
-			<iou_threshold value="0.7" />
+			<!-- This classification head was exported via Ultralytics, which always
+			     tags model_type "YOLO" regardless of task (detect/classify/segment).
+			     DL Streamer's gvaclassify reads model_type verbatim as the
+			     post-processing converter name (see model_info_xml.md) and only
+			     "YOLO" detection converters exist for gvadetect's ToROI path — there
+			     is no "YOLO" converter for gvaclassify's ToTensor path, so it fails
+			     with "ToTensorConverter 'YOLO' is not implemented.". This model's
+			     single [1,4] softmax output is a plain classification result, so
+			     "label" (DL Streamer's generic argmax-over-labels converter) is the
+			     correct converter — labels below are used as-is. iou_threshold and
+			     pad_value were YOLO-detection NMS/letterbox hints that don't apply
+			     to classification and are dropped; reverse_input_channels and
+			     scale_values are kept since they still drive gvaclassify's own
+			     image pre-processing (BGR->RGB, /255 normalization) independent of
+			     the post-processing converter. -->
 			<labels value="Mixture NoGas Perfume Smoke" />
-			<model_type value="YOLO" />
-			<pad_value value="114" />
+			<model_type value="label" />
 			<reverse_input_channels value="YES" />
 			<scale_values value="255" />
 		</model_info>

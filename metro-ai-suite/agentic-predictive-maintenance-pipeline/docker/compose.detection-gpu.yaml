@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Optional GPU device mapping for the detection service. Use cases that run
-# OpenVINO inference directly inside apm-detection (e.g. gas-detection-multimodal's
+# OpenVINO inference directly inside apm-detection (e.g. gas-detection's
 # image classifier and sensor MLP) need the render node mapped in and the
 # render group added so the non-root container user can access it — otherwise
 # OpenVINO only enumerates CPU and a device=GPU run fails.

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Optional NPU device mapping for the detection service. Use cases that run
-# OpenVINO inference directly inside apm-detection (e.g. gas-detection-multimodal)
+# OpenVINO inference directly inside apm-detection (e.g. gas-detection)
 # on device=NPU need /dev/accel mapped in — otherwise OpenVINO can't reach the
 # NPU and a device=NPU run fails. The group that owns /dev/accel is granted
 # separately (compose.detection-npu-group.yaml) so it isn't duplicated when the

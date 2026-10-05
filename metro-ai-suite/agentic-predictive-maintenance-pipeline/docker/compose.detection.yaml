@@ -24,6 +24,15 @@ services:
       # DL Streamer Pipeline Server
       DLSTREAMER_URL: http://dlstreamer-pipeline-server:8554
       DLSTREAMER_PIPELINE_NAME: ${DLSTREAMER_PIPELINE_NAME:-pipeline_defect_detection}
+      # Per-device pipeline names (dlstreamer_client.py._PIPELINE_NAME_BY_DEVICE).
+      # Use cases whose DL Streamer pipelines aren't named "pipeline_defect_detection*"
+      # (e.g. gas-detection's gvaclassify pipelines) must override these
+      # via their own .env_<use-case> file — without forwarding them here, the
+      # container only ever sees the pipeline_defect_detection* defaults below and
+      # DL Streamer rejects the start request with "Pipeline not found".
+      DLSTREAMER_PIPELINE_NAME_CPU: ${DLSTREAMER_PIPELINE_NAME_CPU:-pipeline_defect_detection}
+      DLSTREAMER_PIPELINE_NAME_GPU: ${DLSTREAMER_PIPELINE_NAME_GPU:-pipeline_defect_detection_gpu}
+      DLSTREAMER_PIPELINE_NAME_NPU: ${DLSTREAMER_PIPELINE_NAME_NPU:-pipeline_defect_detection_npu}
       # Storage service
       STORAGE_SERVICE_URL: http://apm-storage:5001
       # Run IDs are process-local, so remove detections that cannot be tied to
@@ -40,7 +49,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ${USE_CASE_RESOURCES_DIR:-/tmp/resources}/videos:/app/videos:ro
-      # Per-use-case OpenVINO models (e.g. gas-detection-multimodal's image
+      # Per-use-case OpenVINO models (e.g. gas-detection's image
       # classifier and sensor MLP) and configs (e.g. a multimodal use-case's
       # gas_detection.docker.json), for use cases that classify a static
       # dataset directly instead of a live DL Streamer video pipeline. Unused

@@ -163,8 +163,12 @@ monolithic `pace/` CLI structure:
   without a real model file).
 - **`image_classifier.py`** — `ImageClassifier`: direct OpenVINO inference
   over a folder of images (bypasses DL Streamer). Ported from
-  `OpenVINOClassifyHandler`.
-- Added `numpy`, `opencv-python-headless`, and `openvino` to
+  `OpenVINOClassifyHandler`. **Since removed**: the image branch now runs as a
+  DL Streamer `gvaclassify` pipeline (`configs/pipeline-server-config.json`),
+  collected per run by `dlstreamer_mqtt_collector.py` and re-joined to sensor
+  rows via `frame_manifest.json` (see the use case README).
+- Added `numpy`, `opencv-python-headless` (later dropped with
+  `image_classifier.py`), and `openvino` to
   `detection-service/requirements.txt` (previously detection-service only
   called out to the DL Streamer container over REST and had no ML runtime
   of its own).
@@ -220,7 +224,7 @@ monolithic `pace/` CLI structure:
   regardless of which path produced a batch.
 - **`apps/gas-detection-multimodal/`**: full use-case directory (configs,
   prompts, trained models, `.env` file) — deployable via
-  `source setup.sh --use-case gas-detection-multimodal`.
+  `source setup.sh --use-case gas-detection`.
 - **End-to-end validation**: brought up the full stack (nginx, storage,
   detection, agent, ui, mqtt, dlstreamer, model-download, metrics — all
   healthy) via Docker Compose, triggered a real classification run through
@@ -373,7 +377,7 @@ no separate vision-only code path is needed.
 The current architecture is **single-tenant, config-at-startup**: one Docker Compose stack runs
 exactly one use case, and switching use cases means tearing down/recreating containers with a
 different `.env_<use-case>` — it is not possible to have `pipeline-defect-detection` and
-`gas-detection-multimodal` served concurrently by the same containers. Root causes:
+`gas-detection` served concurrently by the same containers. Root causes:
 
 - **Fixed container names, one instance each.** Every service uses a hardcoded `container_name`
   (`apm-detection`, `apm-agent`, `apm-storage`, ...) instead of Compose's per-project namespacing.

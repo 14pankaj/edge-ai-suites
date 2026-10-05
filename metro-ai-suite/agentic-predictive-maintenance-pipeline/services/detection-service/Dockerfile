@@ -13,7 +13,7 @@ RUN groupadd -r appuser && useradd -r -g appuser -u 1002 appuser
 
 # Intel GPU compute runtime (OpenCL + Level Zero user-mode drivers). Required
 # for use cases that run OpenVINO inference on device=GPU directly inside this
-# container (e.g. gas-detection-multimodal). Without it OpenVINO's GPU plugin
+# container (e.g. gas-detection). Without it OpenVINO's GPU plugin
 # can't initialize and only CPU is enumerated. Sourced from the same Intel
 # graphics PPA the host uses so the user-mode driver tracks the host kernel
 # driver. Set --build-arg INSTALL_GPU_RUNTIME=false to build a CPU-only image.

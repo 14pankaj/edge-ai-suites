@@ -10,7 +10,7 @@ the blueprint-specific changes are:
 
   1. ``--use-case`` flag selects the use case (default: pipeline-defect-detection)
   2. The generated sample video is placed at
-     ``apps/<use-case>/resources/videos/datastream.mp4`` so DL Streamer can read
+     ``apps/<dir>/resources/videos/datastream.mp4`` so DL Streamer can read
      it immediately after running this script.
   3. Training data is written to ``datasets/<use_case>/`` (YOLO format).
 
@@ -28,6 +28,9 @@ Supported use cases
         datasets/gas_detection/images/train/{class}/
         datasets/gas_detection/images/val/
         datasets/gas_detection/sensor_data/
+      Creates the inference video + frame-index -> filename manifest at:
+        apps/gas-detection-multimodal/resources/videos/datastream.mp4
+        datasets/gas_detection/images/val/frame_manifest.json
 
 DISCLAIMER:
     By using this script you are solely responsible for ensuring you have the
@@ -78,6 +81,14 @@ _USE_CASE_MAP = {
     "pipeline-defect-detection": "pipeline_defect_detection",
     "gas-detection":             "gas_detection",
     # extend for new use cases (e.g. "weld-defect-detection": "weld_defect_detection")
+}
+
+# Maps CLI use-case names → the apps/<dir> directory the video is written under.
+# Not always identical to the use-case name itself (use case "gas-detection"
+# lives in apps/gas-detection-multimodal/).
+_APP_DIR_MAP = {
+    "pipeline-defect-detection": "pipeline-defect-detection",
+    "gas-detection":             "gas-detection-multimodal",
 }
 
 
@@ -250,17 +261,46 @@ def prep_gas_detection(download_dir: Path, output_dir: Path,
 # Video creation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def create_video_from_images(images_dir: Path, video_path: Path, fps: int = 30) -> bool:
-    """Build an MP4 from all .jpg images in *images_dir* and write to *video_path*."""
+def list_images_sorted(images_dir: Path) -> list:
+    """Return all .jpg (falling back to .png) images in *images_dir*, sorted by name.
+
+    This is the single source of truth for "frame order" — both video creation
+    and the frame-index → filename manifest must iterate this same list so a
+    DL Streamer frame id can be reliably mapped back to its source image.
+    """
+    image_files = sorted(images_dir.glob("*.jpg"))
+    if not image_files:
+        image_files = sorted(images_dir.glob("*.png"))
+    return image_files
+
+
+def write_frame_manifest(image_files: list, manifest_path: Path) -> None:
+    """Write a frame_index -> filename JSON manifest for *image_files* (in order).
+
+    Lets a later stage join a DL Streamer pipeline's per-frame results (only a
+    frame id, no filename) back to the original image filename (e.g. to re-join
+    per-sample sensor CSV rows keyed by filename).
+    """
+    manifest = {str(i): f.name for i, f in enumerate(image_files)}
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    print(f"   ✅ {manifest_path}  ({len(manifest)} frames)")
+
+
+def create_video_from_images(images_dir: Path, video_path: Path, fps: int = 30,
+                             manifest_path: Path = None) -> bool:
+    """Build an MP4 from all .jpg images in *images_dir* and write to *video_path*.
+
+    If *manifest_path* is given, also writes a frame_index -> filename JSON
+    manifest (see ``write_frame_manifest``) using the exact same sorted file
+    order the video frames are written in.
+    """
     if cv2 is None:
         print("   ⚠️  opencv-python not installed — skipping video creation.")
         print("       Install with: pip install opencv-python")
         return False
 
-    image_files = sorted(images_dir.glob("*.jpg"))
-    if not image_files:
-        # Try png fallback
-        image_files = sorted(images_dir.glob("*.png"))
+    image_files = list_images_sorted(images_dir)
     if not image_files:
         print(f"   ⚠️  No images found in {images_dir} — skipping video creation.")
         return False
@@ -279,15 +319,26 @@ def create_video_from_images(images_dir: Path, video_path: Path, fps: int = 30) 
         fps,
         (w, h),
     )
-    written = 0
+    if not writer.isOpened():
+        print(f"   ❌ Could not open {video_path} for writing (check directory permissions).")
+        return False
+
+    # Only frames actually written to the video go into the manifest, so a
+    # frame index always maps to the image that produced that frame.
+    written_files = []
     for img_file in image_files:
         frame = cv2.imread(str(img_file))
         if frame is not None:
             if frame.shape[:2] != (h, w):
                 frame = cv2.resize(frame, (w, h))
             writer.write(frame)
-            written += 1
+            written_files.append(img_file)
     writer.release()
+    written = len(written_files)
+
+    if not video_path.is_file() or video_path.stat().st_size == 0:
+        print(f"   ❌ Video was not written to {video_path}.")
+        return False
 
     # cv2 mp4v writer places the moov atom at the end of the file.
     # GStreamer qtdemux only scans the first 10 MB, so it fails to find moov.
@@ -312,6 +363,9 @@ def create_video_from_images(images_dir: Path, video_path: Path, fps: int = 30) 
         print("      Install ffmpeg to optimize video streaming.")
 
     print(f"   ✅ {video_path}  ({written} frames @ {fps} fps, {written/fps:.1f}s)")
+
+    if manifest_path is not None:
+        write_frame_manifest(written_files, manifest_path)
     return True
 
 
@@ -357,9 +411,10 @@ def main():
     use_case_id = _USE_CASE_MAP[args.use_case]
     output_dir  = Path("datasets") / use_case_id
     download_dir = output_dir / "_raw_download"
+    app_dir_name = _APP_DIR_MAP[args.use_case]
 
     # Blueprint: video output goes directly into the DL Streamer resources dir
-    video_output_path = Path("apps") / args.use_case / "resources" / "videos" / "datastream.mp4"
+    video_output_path = Path("apps") / app_dir_name / "resources" / "videos" / "datastream.mp4"
 
     print(DISCLAIMER)
     print("=" * 70)
@@ -374,9 +429,17 @@ def main():
     print()
 
     # ── Gas detection ─────────────────────────────────────────────────────────
-    if args.use_case == "gas-detection":
+    if use_case_id == "gas_detection":
+        manifest_path = output_dir / "images" / "val" / "frame_manifest.json"
         if output_dir.exists() and (output_dir / "images" / "val").exists():
             print(f"✅ Dataset already at {output_dir} — skipping download.")
+            if not video_output_path.exists() or not manifest_path.exists():
+                print("🎬 Creating video + frame manifest from existing val images...")
+                if not create_video_from_images(
+                    output_dir / "images" / "val", video_output_path,
+                    manifest_path=manifest_path,
+                ):
+                    sys.exit("❌ Failed to create the gas-detection video + frame manifest.")
             return
 
         download_dataset(args.dataset_url, download_dir, "gas-dataset.zip")
@@ -387,11 +450,23 @@ def main():
         if not args.keep_download:
             shutil.rmtree(download_dir, ignore_errors=True)
 
+        # Create sample video (+ frame-index -> filename manifest for later
+        # sensor-fusion re-joining) for DL Streamer inference.
+        print("🎬 Creating video + frame manifest for DL Streamer inference...")
+        if not create_video_from_images(
+            output_dir / "images" / "val", video_output_path,
+            manifest_path=manifest_path,
+        ):
+            sys.exit("❌ Failed to create the gas-detection video + frame manifest.")
+        print()
+
         print("=" * 70)
         print("✅ Dataset ready!")
         print(f"  📁 {output_dir}/images/train/{{class}}/  ({n_train} images)")
         print(f"  📁 {output_dir}/images/val/             ({n_val} images)")
         print(f"  📁 {output_dir}/sensor_data/")
+        print(f"  🎬 {video_output_path}  ← DL Streamer sample video")
+        print(f"  🗺️  {manifest_path}  ← frame-index → filename manifest")
         print()
         return
 

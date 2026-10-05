@@ -1,4 +1,4 @@
-use_case_id: gas-detection-multimodal
+use_case_id: gas-detection
 
 # Agent configuration for the gas-detection multimodal (image + sensor
 # fusion) use case. Unlike pipeline-defect-detection, this classifies a

@@ -1,9 +1,10 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for multimodal_runner.py — config loading, orchestration, and
-persistence, with ImageClassifier/SensorMLPClassifier mocked so tests run
-without real model files or datasets.
+"""Tests for multimodal_runner.py — config loading, frame-manifest re-join,
+orchestration, and persistence, with the DL Streamer pipeline call/collector
+and SensorMLPClassifier mocked so tests run without a real DL Streamer
+Pipeline Server, MQTT broker, model files, or datasets.
 """
 
 import json
@@ -21,10 +22,17 @@ from src.utility.multimodal_runner import (
 
 
 @pytest.fixture
-def sample_config():
+def frame_manifest_file(tmp_path):
+    manifest = {"0": "img_Smoke.jpg", "1": "img_NoGas.jpg"}
+    path = tmp_path / "frame_manifest.json"
+    path.write_text(json.dumps(manifest))
+    return str(path)
+
+
+@pytest.fixture
+def sample_config(frame_manifest_file):
     return {
-        "images_dir": "/data/images",
-        "image_model_path": "/models/image/best.xml",
+        "frame_manifest_path": frame_manifest_file,
         "sensor_model_path": "/models/sensor/sensor_mlp.xml",
         "sensor_data_path": "/data/sensor.csv",
         "feature_columns": ["MQ2", "MQ3"],
@@ -62,44 +70,63 @@ def test_load_config_missing_required_keys_raises(sample_config):
         os.unlink(path)
 
 
+class FakeCollector:
+    """Stand-in for GasClassificationCollector — returns canned per-frame
+    classification records instead of really subscribing to MQTT."""
+
+    records: list = []
+    topic = "apm/gas-image-classifications"
+
+    def __init__(self, topic=None, fps=30.0):
+        self.topic = topic or FakeCollector.topic
+        self.fps = fps
+        self.started = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self, expected_count=None):
+        return FakeCollector.records
+
+
+class FakeSensorClassifier:
+    def __init__(self, model_path, data_path, feature_columns, join_column, device):
+        pass
+
+    def load(self):
+        pass
+
+    def infer(self, sample_keys, n_classes):
+        return [
+            {"source": key, "probabilities": [0.1, 0.1, 0.1, 0.7],
+             "sensor_raw_json": json.dumps({"MQ2": 1.0})}
+            for key in sample_keys
+        ]
+
+    @staticmethod
+    def sample_key_from_image_name(name):
+        return name.rsplit(".", 1)[0]
+
+
+def _patch_pipeline(monkeypatch, runner_mod, records):
+    FakeCollector.records = records
+    monkeypatch.setattr(runner_mod, "GasClassificationCollector", FakeCollector)
+    monkeypatch.setattr(runner_mod, "SensorMLPClassifier", FakeSensorClassifier)
+    monkeypatch.setattr(
+        runner_mod.dlstreamer_client, "run_pipeline_to_completion",
+        lambda **kwargs: {"state": "COMPLETED"},
+    )
+
+
 def test_run_multimodal_classification_fuses_both_branches(sample_config, monkeypatch):
-    """Wire fake ImageClassifier/SensorMLPClassifier and confirm the runner
-    calls fusion.late_fusion with the branches it produced."""
+    """Wire a fake collector/pipeline-run/SensorMLPClassifier and confirm the
+    runner re-joins frame ids to filenames via the manifest, then fuses."""
     import src.utility.multimodal_runner as runner_mod
 
-    class FakeImageClassifier:
-        def __init__(self, model_path, device, img_size):
-            pass
-
-        def load(self):
-            pass
-
-        def infer_directory(self, images_dir):
-            return [
-                {"source": "img_Smoke.jpg", "probabilities": [0.05, 0.05, 0.05, 0.85]},
-                {"source": "img_NoGas.jpg", "probabilities": [0.1, 0.8, 0.05, 0.05]},
-            ]
-
-    class FakeSensorClassifier:
-        def __init__(self, model_path, data_path, feature_columns, join_column, device):
-            pass
-
-        def load(self):
-            pass
-
-        def infer(self, sample_keys, n_classes):
-            return [
-                {"source": key, "probabilities": [0.1, 0.1, 0.1, 0.7],
-                 "sensor_raw_json": json.dumps({"MQ2": 1.0})}
-                for key in sample_keys
-            ]
-
-        @staticmethod
-        def sample_key_from_image_name(name):
-            return name.rsplit(".", 1)[0]
-
-    monkeypatch.setattr(runner_mod, "ImageClassifier", FakeImageClassifier)
-    monkeypatch.setattr(runner_mod, "SensorMLPClassifier", FakeSensorClassifier)
+    _patch_pipeline(monkeypatch, runner_mod, records=[
+        {"frame_id": 0, "label": "Smoke", "confidence": 0.85, "probabilities": None},
+        {"frame_id": 1, "label": "NoGas", "confidence": 0.8, "probabilities": None},
+    ])
 
     results = run_multimodal_classification(sample_config, device="CPU")
 
@@ -111,22 +138,41 @@ def test_run_multimodal_classification_fuses_both_branches(sample_config, monkey
     assert smoke_result["sensor_raw_json"] == json.dumps({"MQ2": 1.0})
 
 
-def test_run_multimodal_classification_no_images_raises(sample_config, monkeypatch):
+def test_run_multimodal_classification_prefers_raw_probabilities(sample_config, monkeypatch):
+    """When the collector reports a full per-class probability vector, it's
+    used directly instead of the top-1 label/confidence approximation."""
     import src.utility.multimodal_runner as runner_mod
 
-    class EmptyImageClassifier:
-        def __init__(self, model_path, device, img_size):
-            pass
+    _patch_pipeline(monkeypatch, runner_mod, records=[
+        {"frame_id": 0, "label": "Smoke", "confidence": 0.85,
+         "probabilities": [0.02, 0.05, 0.06, 0.87]},
+        {"frame_id": 1, "label": "NoGas", "confidence": 0.8,
+         "probabilities": [0.1, 0.8, 0.05, 0.05]},
+    ])
 
-        def load(self):
-            pass
+    results = run_multimodal_classification(sample_config, device="CPU")
+    assert len(results) == 2
 
-        def infer_directory(self, images_dir):
-            return []
 
-    monkeypatch.setattr(runner_mod, "ImageClassifier", EmptyImageClassifier)
+def test_run_multimodal_classification_no_classifications_raises(sample_config, monkeypatch):
+    import src.utility.multimodal_runner as runner_mod
 
-    with pytest.raises(MultimodalRunError, match="No images found"):
+    _patch_pipeline(monkeypatch, runner_mod, records=[])
+
+    with pytest.raises(MultimodalRunError, match="No image classifications collected"):
+        run_multimodal_classification(sample_config, device="CPU")
+
+
+def test_run_multimodal_classification_unmatched_frame_ids_raise(sample_config, monkeypatch):
+    """Frame ids with no manifest entry are skipped; if none match at all,
+    the run fails loudly rather than silently fusing zero samples."""
+    import src.utility.multimodal_runner as runner_mod
+
+    _patch_pipeline(monkeypatch, runner_mod, records=[
+        {"frame_id": 99, "label": "Smoke", "confidence": 0.85, "probabilities": None},
+    ])
+
+    with pytest.raises(MultimodalRunError, match="could be matched"):
         run_multimodal_classification(sample_config, device="CPU")
 
 
