@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Intel Corporation -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5,22 +7,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agentic Predictive Maintenance — {{ use_case_id }}</title>
   <link rel="stylesheet" href="/static/css/style.css">
+  <script src="/static/js/theme.js"></script>
   <noscript><meta http-equiv="refresh" content="15"></noscript>
 </head>
 <body>
   <header>
     <div class="header-inner">
-      <span class="logo">&#9632; Intel</span>
       <h1>Agentic Predictive Maintenance</h1>
-      <span class="use-case-badge">{{ use_case_id }}</span>
-      <span id="pipeline-live-banner" class="live-banner {{ 'live-on' if active_run else 'live-off' }}">
-        <span class="live-dot"></span>
-        <span id="pipeline-live-text">
-          {% if active_run %}
-            {{ 'Inspection: RUNNING (' ~ active_run.phase ~ ')' if active_run.phase else 'Inspection: RUNNING' }}
-          {% else %}Inspection: IDLE{% endif %}
-        </span>
-      </span>
+      <div class="header-actions">
+        <button id="themeToggle" class="icon-button" type="button" aria-label="Toggle light/dark theme" title="Toggle light/dark theme">
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -30,213 +29,281 @@
     <a href="/chat">Ask &amp; Analyze</a>
   </nav>
 
-  <div class="layout-wrapper">
-  <main>
-    <section class="card">
-      <h2>Run Inspection</h2>
+  <div class="dashboard-grid">
 
-      <div class="live-grid">
-        <div class="live-stat">
-          <span class="live-stat-value" id="stat-detections">
-            {{ summary.by_class | sum(attribute="count") if summary and summary.by_class else 0 }}
-          </span>
-          <span class="live-stat-label">Total detections stored</span>
-          <form method="POST" action="/clear-detections" class="live-stat-action">
-            <button type="submit" class="btn-danger btn-small"
-              onclick="return confirm('This will permanently delete all detection records. Continue?')">
-              Clear
-            </button>
-          </form>
-        </div>
-        <div class="live-stat">
-          <span class="live-stat-value" id="stat-runs-completed">
-            {{ runs | selectattr("status", "equalto", "completed") | list | length if runs else 0 }}
-          </span>
-          <span class="live-stat-label">Runs completed</span>
-        </div>
-        <div class="live-stat">
-          <span class="live-stat-value" id="stat-runs-running">
-            {{ runs | selectattr("status", "equalto", "running") | list | length if runs else 0 }}
-          </span>
-          <span class="live-stat-label">Runs in progress</span>
-        </div>
-      </div>
+    <!-- ── Left column: pipeline config + live system metrics + system info ── -->
+    <div class="dash-col dash-col-left">
+      <section class="card">
+        <h2>Run Inspection</h2>
 
-      {% if summary and summary.by_class %}
-      <table id="detections-table">
-        <thead><tr><th>Class</th><th>Count</th><th>Avg Confidence</th><th>Max Confidence</th></tr></thead>
-        <tbody id="detections-tbody">
-          {% for cls in summary.by_class %}
-          <tr>
-            <td><span class="label-badge">{{ cls.label }}</span></td>
-            <td>{{ cls.count }}</td>
-            <td>{{ "%.3f"|format(cls.avg_confidence) }}</td>
-            <td>{{ "%.3f"|format(cls.max_confidence) }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <p class="empty" id="detections-empty">No detections yet. Click "Run Inspection" to start.</p>
-      <table id="detections-table" style="display:none">
-        <thead><tr><th>Class</th><th>Count</th><th>Avg Confidence</th><th>Max Confidence</th></tr></thead>
-        <tbody id="detections-tbody"></tbody>
-      </table>
-      {% endif %}
-
-      {% if multimodal_enabled %}
-      <form method="POST" action="/run-multimodal" class="run-now-form">
-        <fieldset class="pipeline-config" id="pipeline-config-fieldset" {{ 'disabled' if active_run else '' }}>
-          <legend>&#9881; Pipeline Configuration</legend>
-          <div class="config-grid">
-            <label class="config-field">
-              <span>Use Case</span>
-              <select name="use_case" disabled>
-                <option selected>{{ use_case_id }}</option>
-              </select>
-            </label>
-            <label class="config-field">
-              <span>Device</span>
-              <select name="device">
-                {% for d in devices %}
-                <option value="{{ d }}" {{ 'selected' if d == 'CPU' else '' }}>{{ d }}</option>
-                {% endfor %}
-              </select>
-            </label>
-          </div>
-        </fieldset>
-        <button type="submit" class="btn-primary" id="run-pipeline-btn" {{ 'disabled' if active_run else '' }}>
-          &#9654; {{ 'Running…' if active_run else 'Run Inspection' }}
-        </button>
-        <span class="status-note" id="run-phase-hint">
-          {% if active_run %}
-            {% if active_run.phase == "detecting" %}Running image + sensor classification and fusion…
-            {% elif active_run.phase == "reasoning" %}Detection complete — agents are analyzing the results…
-            {% else %}Run in progress…{% endif %}
-          {% else %}Ready — click to classify the dataset (image + sensor fusion) and run agent analysis.{% endif %}
-        </span>
-      </form>
-      {% else %}
-      <form method="POST" action="/run" class="run-now-form">
-        <fieldset class="pipeline-config" id="pipeline-config-fieldset" {{ 'disabled' if active_run else '' }}>
-          <legend>&#9881; Pipeline Configuration</legend>
-          <div class="config-grid">
-            <label class="config-field">
-              <span>Use Case</span>
-              <select name="use_case" disabled>
-                <option selected>{{ use_case_id }}</option>
-              </select>
-            </label>
-            <label class="config-field">
-              <span>Device</span>
-              <select name="device">
-                {% for d in devices %}
-                <option value="{{ d }}" {{ 'selected' if d == 'CPU' else '' }}>{{ d }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <label class="config-field">
-              <span>Video</span>
-              <select name="video_filename">
-                {% if videos %}
-                  {% for v in videos %}
-                  <option value="{{ v }}">{{ v }}</option>
+        {% if multimodal_enabled %}
+        <form method="POST" action="/run-multimodal" class="run-now-form">
+          <fieldset class="pipeline-config" id="pipeline-config-fieldset" {{ 'disabled' if active_run else '' }}>
+            <legend>&#9881; Pipeline Configuration</legend>
+            <div class="config-grid">
+              <label class="config-field">
+                <span>Use Case</span>
+                <select name="use_case" disabled>
+                  <option selected>{{ use_case_id }}</option>
+                </select>
+              </label>
+              <label class="config-field">
+                <span>Device</span>
+                <select name="device">
+                  {% for d in devices %}
+                  <option value="{{ d }}" {{ 'selected' if d == 'CPU' else '' }}>{{ d }}</option>
                   {% endfor %}
-                {% else %}
-                  <option value="">datastream.mp4 (default)</option>
-                {% endif %}
-              </select>
-            </label>
+                </select>
+              </label>
+            </div>
+          </fieldset>
+          <button type="submit" class="btn-primary" id="run-pipeline-btn" {{ 'disabled' if active_run else '' }}>
+            &#9654; {{ 'Running…' if active_run else 'Run Inspection' }}
+          </button>
+          <span class="status-note" id="run-phase-hint">
+            {% if active_run %}
+              {% if active_run.phase == "detecting" %}Running image + sensor classification and fusion…
+              {% elif active_run.phase == "reasoning" %}Detection complete — agents are analyzing the results…
+              {% else %}Run in progress…{% endif %}
+            {% else %}Ready — click to classify the dataset (image + sensor fusion) and run agent analysis.{% endif %}
+          </span>
+        </form>
+        {% else %}
+        <form method="POST" action="/run" class="run-now-form">
+          <fieldset class="pipeline-config" id="pipeline-config-fieldset" {{ 'disabled' if active_run else '' }}>
+            <legend>&#9881; Pipeline Configuration</legend>
+            <div class="config-grid">
+              <label class="config-field">
+                <span>Use Case</span>
+                <select name="use_case" disabled>
+                  <option selected>{{ use_case_id }}</option>
+                </select>
+              </label>
+              <label class="config-field">
+                <span>Device</span>
+                <select name="device">
+                  {% for d in devices %}
+                  <option value="{{ d }}" {{ 'selected' if d == 'CPU' else '' }}>{{ d }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label class="config-field">
+                <span>Video</span>
+                <select name="video_filename">
+                  {% if videos %}
+                    {% for v in videos %}
+                    <option value="{{ v }}">{{ v }}</option>
+                    {% endfor %}
+                  {% else %}
+                    <option value="">datastream.mp4 (default)</option>
+                  {% endif %}
+                </select>
+              </label>
+            </div>
+          </fieldset>
+          <button type="submit" class="btn-primary" id="run-pipeline-btn" {{ 'disabled' if active_run else '' }}>
+            &#9654; {{ 'Running…' if active_run else 'Run Inspection' }}
+          </button>
+          <span class="status-note" id="run-phase-hint">
+            {% if active_run %}
+              {% if active_run.phase == "detecting" %}Running DL Streamer inference over the video…
+              {% elif active_run.phase == "reasoning" %}Detection complete — agents are analyzing the results…
+              {% else %}Run in progress…{% endif %}
+            {% else %}Ready — click to run inference + agent analysis.{% endif %}
+          </span>
+        </form>
+        {% endif %}
+      </section>
+
+      <section class="card metrics-card">
+        <h2>System Metrics <span class="live-pill">LIVE</span></h2>
+        <p class="metrics-status" id="metrics-status">Connecting to metrics stream…</p>
+        <div class="metrics-stats">
+          <div class="metric-item">
+            <span class="live-stat-value" id="metric-cpu">—</span>
+            <span class="live-stat-label">CPU</span>
           </div>
-        </fieldset>
-        <button type="submit" class="btn-primary" id="run-pipeline-btn" {{ 'disabled' if active_run else '' }}>
-          &#9654; {{ 'Running…' if active_run else 'Run Inspection' }}
-        </button>
-        <span class="status-note" id="run-phase-hint">
-          {% if active_run %}
-            {% if active_run.phase == "detecting" %}Running DL Streamer inference over the video…
-            {% elif active_run.phase == "reasoning" %}Detection complete — agents are analyzing the results…
-            {% else %}Run in progress…{% endif %}
-          {% else %}Ready — click to run inference + agent analysis.{% endif %}
-        </span>
-      </form>
-      {% endif %}
-    </section>
+          <div class="metric-item">
+            <span class="live-stat-value" id="metric-ram">—</span>
+            <span class="live-stat-label">RAM</span>
+          </div>
+          <div class="metric-item">
+            <span class="live-stat-value" id="metric-gpu">—</span>
+            <span class="live-stat-label">GPU</span>
+          </div>
+          <div class="metric-item">
+            <span class="live-stat-value" id="metric-npu">—</span>
+            <span class="live-stat-label">NPU</span>
+          </div>
+        </div>
+        <canvas id="metrics-chart" height="120"></canvas>
+      </section>
 
-    <section class="card">
-      <h2>Recent Agent Runs</h2>
-      {% if runs %}
-      <table id="runs-table">
-        <thead><tr><th>Run ID</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody id="runs-tbody">
-          {% for run in runs[-10:]|reverse %}
-          <tr>
-            <td class="run-id-cell"><code>{{ run.run_id }}</code></td>
-            <td><span class="status-badge status-{{ run.status }}">{{ run.status }}{{ ' — ' ~ run.phase if run.status == 'running' and run.phase else '' }}</span></td>
-            <td>
-              {% if run.status == "completed" %}
-              <a href="/results/{{ run.run_id }}">View Results</a>
-              <span aria-hidden="true"> · </span>
-              <a href="/chat?run_id={{ run.run_id | urlencode }}">Ask about run</a>
-              {% elif run.status == "running" %}
-              <a href="/results/{{ run.run_id }}">Waiting…</a>
-              {% else %}
-              <a href="/results/{{ run.run_id }}">View Error</a>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <p class="empty" id="runs-empty">No runs yet.</p>
-      <table id="runs-table" style="display:none">
-        <thead><tr><th>Run ID</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody id="runs-tbody"></tbody>
-      </table>
-      {% endif %}
-    </section>
-  </main>
-
-  <aside class="metrics-sidebar">
-    <div class="card">
-      <h2>System Metrics</h2>
-      <p class="metrics-status" id="metrics-status">Connecting to metrics stream…</p>
-      <div class="metrics-stats">
-        <div class="metric-item">
-          <span class="live-stat-value" id="metric-cpu">—</span>
-          <span class="live-stat-label">CPU</span>
-        </div>
-        <div class="metric-item">
-          <span class="live-stat-value" id="metric-ram">—</span>
-          <span class="live-stat-label">RAM</span>
-        </div>
-        <div class="metric-item">
-          <span class="live-stat-value" id="metric-gpu">—</span>
-          <span class="live-stat-label">GPU</span>
-        </div>
-        <div class="metric-item">
-          <span class="live-stat-value" id="metric-npu">—</span>
-          <span class="live-stat-label">NPU</span>
-        </div>
-      </div>
-      <canvas id="metrics-chart" height="160"></canvas>
-      <section class="system-info-section">
+      <section class="card system-info-card">
         <h2>System Info</h2>
         <div id="systemCapabilityCards" class="system-capability-cards" role="list"
           aria-label="System compute devices" aria-live="polite" hidden></div>
       </section>
     </div>
-  </aside>
+
+    <!-- ── Center column: live preview, recent frames, detection summary ── -->
+    <div class="dash-col dash-col-center">
+      <section class="card placeholder-card">
+        <h2>Camera Preview
+          <span class="placeholder-badge" title="No frame-image backend yet — this is a design placeholder">PLACEHOLDER</span>
+        </h2>
+        <div class="camera-preview-box">
+          <span>Live frame + bounding-box overlay will render here once the detection-service
+            exposes a frame-image endpoint.</span>
+        </div>
+        <p class="status-note">Requires a backend change (see follow-up) to serve frame images.</p>
+      </section>
+
+      <section class="card placeholder-card">
+        <h2>Recent Defect Frames
+          <span class="placeholder-badge" title="No frame-image backend yet — this is a design placeholder">PLACEHOLDER</span>
+          <a href="/detections" class="view-all-link">View all detections</a>
+        </h2>
+        <div class="frame-strip" aria-label="Recent defect frame thumbnails (horizontally scrollable)">
+          <div class="frame-thumb"><span>Frame</span></div>
+          <div class="frame-thumb"><span>Frame</span></div>
+          <div class="frame-thumb"><span>Frame</span></div>
+          <div class="frame-thumb"><span>Frame</span></div>
+          <div class="frame-thumb"><span>Frame</span></div>
+        </div>
+        <p class="status-note">Scrolls horizontally — about 3–4 thumbnails visible at rest, 2–3 while scrolling.</p>
+      </section>
+
+      <section class="card live-grid-card">
+        <div class="live-grid">
+          <div class="live-stat">
+            <span class="live-stat-value" id="stat-detections">
+              {{ summary.by_class | sum(attribute="count") if summary and summary.by_class else 0 }}
+            </span>
+            <span class="live-stat-label">Total detections stored</span>
+            <form method="POST" action="/clear-detections" class="live-stat-action">
+              <button type="submit" class="btn-danger btn-small"
+                onclick="return confirm('This will permanently delete all detection records. Continue?')">
+                Clear
+              </button>
+            </form>
+          </div>
+          <div class="live-stat">
+            <span class="live-stat-value" id="stat-runs-completed">
+              {{ runs | selectattr("status", "equalto", "completed") | list | length if runs else 0 }}
+            </span>
+            <span class="live-stat-label">Runs completed</span>
+          </div>
+          <div class="live-stat">
+            <span class="live-stat-value" id="stat-runs-running">
+              {{ runs | selectattr("status", "equalto", "running") | list | length if runs else 0 }}
+            </span>
+            <span class="live-stat-label">Runs in progress</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>
+          Detection Summary
+          <button type="button" class="btn-pill placeholder-btn" disabled
+            title="PLACEHOLDER — no CSV export endpoint yet">&#8681; Export CSV</button>
+        </h2>
+        {% if summary and summary.by_class %}
+        <table id="detections-table">
+          <thead><tr><th>Class</th><th>Count</th><th>Avg Confidence</th><th>Max Confidence</th></tr></thead>
+          <tbody id="detections-tbody">
+            {% for cls in summary.by_class %}
+            <tr>
+              <td><span class="label-badge">{{ cls.label }}</span></td>
+              <td>{{ cls.count }}</td>
+              <td>{{ "%.3f"|format(cls.avg_confidence) }}</td>
+              <td>{{ "%.3f"|format(cls.max_confidence) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="empty" id="detections-empty">No detections yet. Click "Run Inspection" to start.</p>
+        <table id="detections-table" style="display:none">
+          <thead><tr><th>Class</th><th>Count</th><th>Avg Confidence</th><th>Max Confidence</th></tr></thead>
+          <tbody id="detections-tbody"></tbody>
+        </table>
+        {% endif %}
+      </section>
+    </div>
+
+    <!-- ── Right column: agent run detail (synced) + recent agent runs ── -->
+    <div class="dash-col dash-col-right">
+      <section class="card" id="agent-run-card">
+        <h2>Agent Run <span class="status-note agent-run-subtitle">— shows the run selected below</span></h2>
+        <div id="agent-run-body">
+          {% include "agent_run_card.html" %}
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Recent Agent Runs</h2>
+        {% if runs %}
+        <table id="runs-table">
+          <thead><tr><th>Run ID</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="runs-tbody">
+            {# Chronological order (oldest -> newest): existing rows stay put
+               and a new run always appends at the bottom, instead of the
+               whole list reshuffling every time a run starts. #}
+            {% for run in runs[-10:] %}
+            <tr class="run-row {{ 'run-row-selected' if run.run_id == selected_run_id else '' }}" data-run-id="{{ run.run_id }}" tabindex="0" role="button"
+              aria-label="Select run {{ run.run_id }} to show its details in the Agent Run card">
+              <td class="run-id-cell"><code title="{{ run.run_id }}">{{ run.run_id }}</code></td>
+              <td><span class="status-badge status-{{ run.status }}">{{ run.status }}{{ ' — ' ~ run.phase if run.status == 'running' and run.phase else '' }}</span></td>
+              <td>
+                <div class="run-actions">
+                {% if run.status == "completed" %}
+                <a href="/results/{{ run.run_id }}">View Results</a>
+                <span aria-hidden="true"> · </span>
+                <a href="/chat?run_id={{ run.run_id | urlencode }}">Ask about run</a>
+                {% elif run.status == "running" %}
+                <a href="/results/{{ run.run_id }}">Waiting…</a>
+                {% else %}
+                <a href="/results/{{ run.run_id }}">View Error</a>
+                {% endif %}
+                <span aria-hidden="true"> · </span>
+                <form method="POST" action="{{ '/run-multimodal' if multimodal_enabled else '/run' }}" class="run-again-form">
+                  <button type="submit" class="btn-link run-again-btn" {{ 'disabled' if active_run else '' }}
+                    onclick="event.stopPropagation();">&#8635; Run again</button>
+                </form>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="empty" id="runs-empty">No runs yet.</p>
+        <table id="runs-table" style="display:none">
+          <thead><tr><th>Run ID</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="runs-tbody"></tbody>
+        </table>
+        {% endif %}
+      </section>
+    </div>
+
   </div>
 
   <footer>
     <p>&#169; Intel Corporation — Agentic Predictive Maintenance Blueprint</p>
   </footer>
 
+  <script>
+    // Consumed by live-status.js when it re-renders "Recent Agent Runs" rows
+    // on each poll, so dynamically-added rows get the same "Run again" action
+    // and disabled state as the server-rendered ones.
+    window.__runAgainAction = {{ ('/run-multimodal' if multimodal_enabled else '/run') | tojson }};
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="/static/js/live-status.js"></script>
   <script src="/static/js/metrics.js"></script>
   <script src="/static/js/system-capabilities.js"></script>
+  <script src="/static/js/run-select.js"></script>
 </body>
 </html>

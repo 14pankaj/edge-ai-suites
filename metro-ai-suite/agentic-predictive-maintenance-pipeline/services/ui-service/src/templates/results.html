@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Intel Corporation -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5,6 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Results — {{ run_id[:8] }} — {{ use_case_id }}</title>
   <link rel="stylesheet" href="/static/css/style.css">
+  <script src="/static/js/theme.js"></script>
   {% if result.get("status") == "running" %}
   <meta http-equiv="refresh" content="3">
   {% endif %}
@@ -12,9 +15,13 @@
 <body>
   <header>
     <div class="header-inner">
-      <span class="logo">&#9632; Intel</span>
       <h1>Agentic Predictive Maintenance</h1>
-      <span class="use-case-badge">{{ use_case_id }}</span>
+      <div class="header-actions">
+        <button id="themeToggle" class="icon-button" type="button" aria-label="Toggle light/dark theme" title="Toggle light/dark theme">
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+      </div>
     </div>
   </header>
   <nav>
@@ -23,10 +30,20 @@
     <a href="/chat">Ask &amp; Analyze</a>
   </nav>
 
-  <main>
-    <section class="card">
-      <h2>Run <code>{{ run_id[:8] }}…</code></h2>
-      {% if result.get("status") == "running" %}
+  <div class="results-page">
+    <p class="breadcrumb"><a href="/">Dashboard</a> / Recent Agent Runs / <code>{{ run_id[:8] }}…</code></p>
+    <div class="results-title-row">
+      <div>
+        <h2>Run Results</h2>
+        {% if not result.get("status") == "running" and not result.get("error") %}
+        <p class="status-note">Reported follow-up frames (if any) are unverified references, not run detections.</p>
+        {% endif %}
+      </div>
+      <a href="/" class="btn-secondary">&larr; Back to Dashboard</a>
+    </div>
+
+    {% if result.get("status") == "running" %}
+      <section class="card">
         {% if phase == "detecting" %}
         <p class="info">&#9203; Running DL Streamer inference over the video… page auto-refreshes every 3 seconds.</p>
         {% elif phase == "reasoning" %}
@@ -34,7 +51,10 @@
         {% else %}
         <p class="info">&#9203; Pipeline is running… page auto-refreshes every 3 seconds.</p>
         {% endif %}
-      {% elif result.get("error") %}
+      </section>
+
+    {% elif result.get("error") %}
+      <section class="card">
         <p class="error">&#10005; Error: {{ result.error }}</p>
         <table class="pipeline-status">
           <thead><tr><th>Agent</th><th>Status</th></tr></thead>
@@ -53,80 +73,131 @@
             {% endfor %}
           </tbody>
         </table>
-      {% else %}
+      </section>
 
-        {% if result.get("ticket") %}
-        <div class="result-section">
-          <h3>&#127882; Maintenance Ticket</h3>
-          {% set t = result.ticket %}
-          {% if t.get("mode") == "fallback" %}
-          <table>
-            <tr><th>Ticket ID</th><td><code>{{ t.ticket_id }}</code></td></tr>
-            <tr><th>Priority</th><td><span class="priority-badge priority-{{ t.priority|lower }}">{{ t.priority }}</span></td></tr>
-            <tr><th>Summary</th><td>{{ t.summary }}</td></tr>
-            <tr><th>Recommendation</th><td>{{ t.recommended_action }}</td></tr>
-          </table>
-          {% else %}
-          <pre class="llm-output">{{ t.ticket }}</pre>
-          {% endif %}
-        </div>
-        {% endif %}
+    {% else %}
+      <section class="run-info-strip placeholder-card">
+        <div><span class="run-info-label">Run ID</span><span class="run-info-value"><code>{{ run_id }}</code></span></div>
+        <div><span class="run-info-label">Start Time <span class="placeholder-badge" title="PLACEHOLDER — not tracked by the backend yet">PLACEHOLDER</span></span><span class="run-info-value">—</span></div>
+        <div><span class="run-info-label">Detection Duration <span class="placeholder-badge" title="PLACEHOLDER — not tracked by the backend yet">PLACEHOLDER</span></span><span class="run-info-value">—</span></div>
+        <div><span class="run-info-label">Video Source <span class="placeholder-badge" title="PLACEHOLDER — submitted at run start but not persisted/returned with results yet">PLACEHOLDER</span></span><span class="run-info-value">—</span></div>
+        <div><span class="run-info-label">Device <span class="placeholder-badge" title="PLACEHOLDER — submitted at run start but not persisted/returned with results yet">PLACEHOLDER</span></span><span class="run-info-value">—</span></div>
+      </section>
 
-        {% if result.get("policy") %}
-        <div class="result-section">
-          <h3>&#128220; Policy</h3>
-          {% set p = result.policy %}
-          {% if p.get("mode") == "fallback" %}
-            {% if p.violations %}
-            <p class="warn">&#9888; {{ p.violations|length }} policy violation(s) detected.</p>
-            <ul>{% for v in p.violations %}<li>{{ v.label }} — avg confidence {{ "%.3f"|format(v.avg_confidence) }} &gt; threshold {{ v.threshold }}</li>{% endfor %}</ul>
+      <div class="results-accent-grid">
+
+        {% set p = result.get("policy") %}
+        <section class="card card-accent accent-policy">
+          <h3>&#128220; Policy
+            {% if p and p.get("mode") == "fallback" and p.violations %}
+            <span class="risk-badge risk-critical">CRITICAL RISK</span>
+            {% endif %}
+          </h3>
+          {% if p %}
+            {% if p.get("mode") == "fallback" %}
+              {% if p.violations %}
+              <p class="warn">&#9888; {{ p.violations|length }} policy violation(s) detected.</p>
+              <table class="threshold-table">
+                <thead><tr><th>Class</th><th>Alert Above</th><th>Run Avg</th><th>Rule</th></tr></thead>
+                <tbody>
+                  {% for v in p.violations %}
+                  <tr class="threshold-row-triggered">
+                    <td>{{ v.label }}</td>
+                    <td>{{ v.threshold }}</td>
+                    <td>{{ "%.2f"|format(v.avg_confidence) }}</td>
+                    <td>TRIGGERED</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              <p class="status-note">
+                <span class="placeholder-badge" title="PLACEHOLDER — the policy agent's fallback payload only reports violating classes today">PLACEHOLDER</span>
+                Non-violating classes' thresholds aren't returned by the backend yet.
+              </p>
+              {% else %}
+              <p class="ok">&#10003; No policy violations. Recommendation: {{ p.recommendation }}</p>
+              {% endif %}
             {% else %}
-            <p class="ok">&#10003; No policy violations. Recommendation: {{ p.recommendation }}</p>
+            <pre class="llm-output">{{ p.policy }}</pre>
             {% endif %}
           {% else %}
-          <pre class="llm-output">{{ p.policy }}</pre>
+          <p class="empty">No policy result for this run.</p>
           {% endif %}
-        </div>
-        {% endif %}
+        </section>
 
-        {% if result.get("analysis") %}
-        <div class="result-section">
+        {% set a = result.get("analysis") %}
+        <section class="card card-accent accent-analysis">
           <h3>&#128202; Analysis</h3>
-          {% set a = result.analysis %}
-          {% if a.get("mode") == "fallback" %}
-          <p>Total detections: <strong>{{ a.total_detections }}</strong></p>
-          <table>
-            <thead><tr><th>Label</th><th>Count</th></tr></thead>
-            <tbody>{% for c in a.by_class %}<tr><td>{{ c.label }}</td><td>{{ c.count }}</td></tr>{% endfor %}</tbody>
-          </table>
+          {% if a %}
+            {% if a.get("mode") == "fallback" %}
+            <p>Total detections: <strong>{{ a.total_detections }}</strong></p>
+            <table>
+              <thead><tr><th>Label</th><th>Count</th></tr></thead>
+              <tbody>{% for c in a.by_class %}<tr><td>{{ c.label }}</td><td>{{ c.count }}</td></tr>{% endfor %}</tbody>
+            </table>
+            {% else %}
+            <pre class="llm-output">{{ a.report }}</pre>
+            {% endif %}
           {% else %}
-          <pre class="llm-output">{{ a.report }}</pre>
+          <p class="empty">No analysis result for this run.</p>
           {% endif %}
-        </div>
-        {% endif %}
+        </section>
 
-        {% if result.get("evidence") %}
-        <div class="result-section">
+        {% set e = result.get("evidence") %}
+        <section class="card card-accent accent-evidence">
           <h3>&#128196; Evidence Audit Trail</h3>
-          {% set e = result.evidence %}
-          {% if e.get("mode") == "fallback" %}
-          <p>Records: {{ e.record_count }} | Labels: {{ e.unique_labels|join(", ") }}</p>
+          {% if e %}
+            {% if e.get("mode") == "fallback" %}
+            <p>Records: <strong>{{ e.record_count }}</strong> &middot; Labels: {{ e.unique_labels|join(", ") }}</p>
+            <p class="status-note">
+              <span class="placeholder-badge" title="PLACEHOLDER — full per-class count/avg/max/min breakdown isn't returned by the evidence agent's fallback payload yet">PLACEHOLDER</span>
+              Per-class evidence breakdown not yet available.
+            </p>
+            <button type="button" class="btn-pill placeholder-btn" disabled
+              title="PLACEHOLDER — no CSV export endpoint yet">&#8681; Download detections CSV</button>
+            {% else %}
+            <pre class="llm-output">{{ e.evidence }}</pre>
+            {% endif %}
           {% else %}
-          <pre class="llm-output">{{ e.evidence }}</pre>
+          <p class="empty">No evidence result for this run.</p>
           {% endif %}
-        </div>
-        {% endif %}
+        </section>
 
-      {% endif %}
-    </section>
-    <p>
-      <a href="/">&larr; Back to Dashboard</a>
-      &nbsp;
-      <form method="POST" action="{{ '/run-multimodal' if multimodal_enabled else '/run' }}" style="display:inline;">
-        <button type="submit" class="btn-primary">&#9654; Run Again</button>
-      </form>
-    </p>
-  </main>
+        {% set t = result.get("ticket") %}
+        <section class="card card-accent accent-ticket">
+          <h3>&#127882; Maintenance Ticket
+            {% if t and t.get("mode") == "fallback" and t.priority and t.priority|lower == "high" %}
+            <span class="risk-badge risk-critical">CRITICAL</span>
+            {% endif %}
+          </h3>
+          {% if t %}
+            {% if t.get("mode") == "fallback" %}
+            <table>
+              <tr><th>Ticket ID</th><td><code>{{ t.ticket_id }}</code></td></tr>
+              <tr><th>Priority</th><td><span class="priority-badge priority-{{ t.priority|lower }}">{{ t.priority }}</span></td></tr>
+              <tr><th>Summary</th><td>{{ t.summary }}</td></tr>
+              <tr><th>Recommendation</th><td>{{ t.recommended_action }}</td></tr>
+              <tr><th>Affected Component <span class="placeholder-badge" title="PLACEHOLDER — not in the ticket agent's fallback payload yet">PLACEHOLDER</span></th><td>—</td></tr>
+              <tr><th>Estimated Resolution <span class="placeholder-badge" title="PLACEHOLDER — not in the ticket agent's fallback payload yet">PLACEHOLDER</span></th><td>—</td></tr>
+              <tr><th>Tags <span class="placeholder-badge" title="PLACEHOLDER — not in the ticket agent's fallback payload yet">PLACEHOLDER</span></th><td>—</td></tr>
+            </table>
+            {% else %}
+            <pre class="llm-output">{{ t.ticket }}</pre>
+            {% endif %}
+          {% else %}
+          <p class="empty">No ticket was created for this run.</p>
+          {% endif %}
+        </section>
+
+      </div>
+
+      <p class="results-footer-actions">
+        <form method="POST" action="{{ '/run-multimodal' if multimodal_enabled else '/run' }}" style="display:inline;">
+          <button type="submit" class="btn-primary">&#9654; Run Again</button>
+        </form>
+      </p>
+    {% endif %}
+  </div>
 
   <footer><p>&#169; Intel Corporation — Agentic Predictive Maintenance Blueprint</p></footer>
 </body>

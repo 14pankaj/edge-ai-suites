@@ -838,6 +838,22 @@ async def index(request: Request):
         summary, runs = await _fetch_summary_and_runs(client)
         videos = await _fetch_videos(client)
 
+        # The "Agent Run" card defaults to the most recent run (active run
+        # takes priority) so it has something to show before any row in
+        # "Recent Agent Runs" is explicitly clicked — run-select.js re-fetches
+        # /api/run/<id> and replaces this view whenever the user picks a
+        # different row, without a full page reload.
+        selected_run = None
+        selected_view = None
+        if runs:
+            selected_run = next(
+                (r for r in reversed(runs) if r.get("status") == "running"), runs[-1]
+            )
+            try:
+                selected_view = await _fetch_run_view(client, selected_run["run_id"])
+            except HTTPException:
+                selected_view = None
+
     active_run = next((r for r in reversed(runs) if r.get("status") == "running"), None)
 
     return templates.TemplateResponse(
@@ -850,8 +866,23 @@ async def index(request: Request):
             "videos": videos,
             "devices": _AVAILABLE_DEVICES,
             "multimodal_enabled": bool(_MULTIMODAL_CONFIG_PATH),
+            "selected_run_id": selected_run["run_id"] if selected_run else None,
+            "selected_phase": selected_view["phase"] if selected_view else None,
+            "selected_result": selected_view["result"] if selected_view else None,
         },
     )
+
+
+@app.get("/api/run/{run_id}")
+async def api_run(run_id: str):
+    """JSON view of a single run's merged phase/result, used by the dashboard's
+    "Agent Run" card to refresh in place when a different row is selected in
+    the "Recent Agent Runs" table (see run-select.js)."""
+    if not _RUN_ID_PATTERN.fullmatch(run_id):
+        raise HTTPException(status_code=400, detail="Invalid run_id")
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        view = await _fetch_run_view(client, run_id)
+    return {"run_id": run_id, "phase": view["phase"], "result": view["result"]}
 
 
 @app.get("/api/status")
@@ -876,7 +907,10 @@ async def api_status():
         "runs_running": running,
         "runs_failed": failed,
         "active_run": active_run,
-        "recent_runs": list(reversed(runs))[:10],
+        # Chronological (oldest -> newest), matching index.html's server-rendered
+        # order, so the "Recent Agent Runs" cards stay top-aligned/fixed in place
+        # and a new run always appends at the bottom instead of reshuffling rows.
+        "recent_runs": runs[-10:],
     }
 
 

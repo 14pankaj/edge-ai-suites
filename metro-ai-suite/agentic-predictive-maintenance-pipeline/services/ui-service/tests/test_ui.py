@@ -70,6 +70,11 @@ def test_index_merges_detection_and_agent_runs(client):
     respx.get("http://mock-agent/agents/runs").mock(return_value=httpx.Response(200, json=[
         {"run_id": completed_run_id, "status": "completed", "phase": "completed"},
     ]))
+    # The dashboard's "Agent Run" card defaults to the running run (r2), so
+    # index() fetches its merged status via _fetch_run_view.
+    respx.get("http://mock-detection/detection/status/r2").mock(
+        return_value=httpx.Response(200, json={"phase": "detecting"})
+    )
     r = client.get("/")
     assert r.status_code == 200
     assert completed_run_id in r.text
@@ -84,11 +89,16 @@ def test_index_running_without_phase_does_not_render_null(client):
         {"run_id": "r1", "status": "running", "phase": None, "result": None},
     ]))
     respx.get("http://mock-agent/agents/runs").mock(return_value=httpx.Response(200, json=[]))
+    # The dashboard's "Agent Run" card defaults to the running run (r1), so
+    # index() fetches its merged status via _fetch_run_view.
+    respx.get("http://mock-detection/detection/status/r1").mock(
+        return_value=httpx.Response(200, json={"phase": None})
+    )
 
     r = client.get("/")
 
     assert r.status_code == 200
-    assert "Inspection: RUNNING" in r.text
+    assert "Running…" in r.text
     assert "RUNNING (None)" not in r.text
     assert "RUNNING (null)" not in r.text
 
