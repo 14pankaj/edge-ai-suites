@@ -1,5 +1,28 @@
 <!-- Copyright (C) 2026 Intel Corporation -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
+{% macro agent_report_body(elem_id, badge_kind, badge_value, headline, key_insights, text) %}
+  {% if badge_value %}
+    {% if badge_kind == "risk" %}
+    <span class="risk-badge risk-{{ badge_value|lower }}">{{ badge_value }} RISK</span>
+    {% else %}
+    <span class="compliance-badge compliance-{{ badge_value|lower }}">{{ badge_value }}</span>
+    {% endif %}
+  {% endif %}
+  {% if headline %}
+  <p class="report-lead">{{ headline }}</p>
+  {% endif %}
+  {% if key_insights %}
+  <ul class="key-insights">
+    {% for item in key_insights %}<li>{{ item }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <div class="report-clamp is-hidden" id="{{ elem_id }}">
+    <div class="agent-report">{{ text|mdlite }}</div>
+  </div>
+  {% if text %}
+  <button type="button" class="btn-pill report-toggle" data-target="{{ elem_id }}">View full report &#9662;</button>
+  {% endif %}
+{% endmacro %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -39,7 +62,7 @@
         <p class="status-note">Reported follow-up frames (if any) are unverified references, not run detections.</p>
         {% endif %}
       </div>
-      <a href="/" class="btn-secondary">&larr; Back to Dashboard</a>
+      <a href="/" class="btn-primary">&larr; Back to Dashboard</a>
     </div>
 
     {% if result.get("status") == "running" %}
@@ -118,7 +141,7 @@
               <p class="ok">&#10003; No policy violations. Recommendation: {{ p.recommendation }}</p>
               {% endif %}
             {% else %}
-            <pre class="llm-output">{{ p.policy }}</pre>
+            {{ agent_report_body("policy-report", "risk", p.get("risk_badge"), p.get("headline"), p.get("key_insights"), p.get("report_text", p.policy)) }}
             {% endif %}
           {% else %}
           <p class="empty">No policy result for this run.</p>
@@ -136,7 +159,7 @@
               <tbody>{% for c in a.by_class %}<tr><td>{{ c.label }}</td><td>{{ c.count }}</td></tr>{% endfor %}</tbody>
             </table>
             {% else %}
-            <pre class="llm-output">{{ a.report }}</pre>
+            {{ agent_report_body("analysis-report", none, none, a.get("headline"), a.get("key_insights"), a.get("report_text", a.report)) }}
             {% endif %}
           {% else %}
           <p class="empty">No analysis result for this run.</p>
@@ -156,7 +179,7 @@
             <button type="button" class="btn-pill placeholder-btn" disabled
               title="PLACEHOLDER — no CSV export endpoint yet">&#8681; Download detections CSV</button>
             {% else %}
-            <pre class="llm-output">{{ e.evidence }}</pre>
+            {{ agent_report_body("evidence-report", "compliance", e.get("compliance_badge"), e.get("headline"), e.get("key_insights"), e.get("report_text", e.evidence)) }}
             {% endif %}
           {% else %}
           <p class="empty">No evidence result for this run.</p>
@@ -165,8 +188,8 @@
 
         {% set t = result.get("ticket") %}
         <section class="card card-accent accent-ticket">
-          <h3>&#127882; Maintenance Ticket
-            {% if t and t.get("mode") == "fallback" and t.priority and t.priority|lower == "high" %}
+          <h3>&#9993;&#65039; Maintenance Ticket
+            {% if t and ((t.get("mode") == "fallback" and t.priority and t.priority|lower == "high") or (t.get("ticket_json") and t.ticket_json.get("Priority") and t.ticket_json.Priority|lower in ["high", "critical"])) %}
             <span class="risk-badge risk-critical">CRITICAL</span>
             {% endif %}
           </h3>
@@ -181,8 +204,24 @@
               <tr><th>Estimated Resolution <span class="placeholder-badge" title="PLACEHOLDER — not in the ticket agent's fallback payload yet">PLACEHOLDER</span></th><td>—</td></tr>
               <tr><th>Tags <span class="placeholder-badge" title="PLACEHOLDER — not in the ticket agent's fallback payload yet">PLACEHOLDER</span></th><td>—</td></tr>
             </table>
+            {% elif t.get("ticket_json") %}
+            {% set tj = t.ticket_json %}
+            <table>
+              {% if tj.get("Priority") %}<tr><th>Priority</th><td><span class="priority-badge priority-{{ tj.Priority|lower }}">{{ tj.Priority }}</span></td></tr>{% endif %}
+              {% if tj.get("Title") %}<tr><th>Title</th><td>{{ tj.Title }}</td></tr>{% endif %}
+              {% if tj.get("Description") %}<tr><th>Description</th><td>{{ tj.Description }}</td></tr>{% endif %}
+              {% if tj.get("Affected component") %}<tr><th>Affected Component</th><td>{{ tj["Affected component"] }}</td></tr>{% endif %}
+              {% if tj.get("Recommended action") %}<tr><th>Recommended Action</th><td>{{ tj["Recommended action"] }}</td></tr>{% endif %}
+              {% if tj.get("Estimated resolution time") %}<tr><th>Estimated Resolution</th><td>{{ tj["Estimated resolution time"] }}</td></tr>{% endif %}
+              {% if tj.get("Tags") %}<tr><th>Tags</th><td>{{ tj.Tags|join(", ") if tj.Tags is iterable and tj.Tags is not string else tj.Tags }}</td></tr>{% endif %}
+            </table>
             {% else %}
-            <pre class="llm-output">{{ t.ticket }}</pre>
+            <div class="report-clamp" id="ticket-report">
+              <div class="agent-report">{{ t.ticket|mdlite }}</div>
+            </div>
+            {% if t.ticket and t.ticket|length > 500 %}
+            <button type="button" class="btn-pill report-toggle" data-target="ticket-report">View full report &#9662;</button>
+            {% endif %}
             {% endif %}
           {% else %}
           <p class="empty">No ticket was created for this run.</p>
@@ -200,5 +239,6 @@
   </div>
 
   <footer><p>&#169; Intel Corporation — Agentic Predictive Maintenance Blueprint</p></footer>
+  <script src="/static/js/results.js" defer></script>
 </body>
 </html>

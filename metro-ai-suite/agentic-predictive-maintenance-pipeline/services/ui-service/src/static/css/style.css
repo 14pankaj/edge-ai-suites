@@ -300,6 +300,38 @@ pre.llm-output {
   overflow-y: auto;
 }
 
+/* Agent report cards — rendered Markdown-lite content (results.html) */
+.agent-report { font-size: 0.85rem; line-height: 1.55; color: var(--text); }
+.agent-report p { margin: 0 0 0.6rem; }
+.agent-report p:last-child { margin-bottom: 0; }
+.agent-report ul, .agent-report ol { margin: 0 0 0.6rem 1.1rem; padding: 0; }
+.agent-report li { margin-bottom: 0.25rem; }
+.agent-report .md-heading {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-top: 0.9rem;
+}
+.agent-report .md-heading:first-child { margin-top: 0; }
+.agent-report table.md-table { margin: 0 0 0.6rem; font-size: 0.82rem; }
+.agent-report table.md-table th, .agent-report table.md-table td { padding: 0.35rem 0.6rem; }
+
+.report-clamp { position: relative; max-height: 190px; overflow: hidden; }
+.report-clamp::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2.5rem;
+  background: linear-gradient(to bottom, transparent, var(--surface));
+  pointer-events: none;
+}
+.report-clamp.is-hidden { display: none; }
+.report-clamp.is-expanded { max-height: none; }
+.report-clamp.is-expanded::after { display: none; }
+.report-toggle { margin-top: 0.6rem; }
+
 /* Filter form */
 .filter-form { display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; }
 .filter-form label { font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.25rem; }
@@ -839,6 +871,17 @@ nav a:focus-visible {
   margin-left: 0.5rem;
 }
 .risk-critical { background: color-mix(in srgb, var(--error) 18%, transparent); color: var(--error); }
+.risk-high     { background: color-mix(in srgb, var(--error) 18%, transparent); color: var(--error); }
+.risk-medium   { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.risk-low      { background: color-mix(in srgb, var(--success) 18%, transparent); color: var(--success); }
+
+.compliance-badge { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.55rem; border-radius: 12px; vertical-align: middle; margin-left: 0.5rem; }
+.compliance-pass { background: color-mix(in srgb, var(--success) 18%, transparent); color: var(--success); }
+.compliance-fail { background: color-mix(in srgb, var(--error) 18%, transparent); color: var(--error); }
+
+.report-lead { font-size: 0.95rem; line-height: 1.5; margin: 0.6rem 0; color: var(--text); }
+.key-insights { margin: 0 0 0.8rem; padding-left: 1.2rem; font-size: 0.85rem; line-height: 1.5; color: var(--text); }
+.key-insights li { margin-bottom: 0.3rem; }
 
 .threshold-table { margin-top: 0.5rem; }
 .threshold-row-triggered td:last-child { color: var(--error); font-weight: 700; }

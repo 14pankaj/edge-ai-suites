@@ -93,6 +93,321 @@ app.mount("/static", StaticFiles(directory=os.path.join(_src_dir, "static")), na
 templates = Jinja2Templates(directory=os.path.join(_src_dir, "templates"))
 
 
+# ── Agent report rendering helpers ───────────────────────────────────────────
+#
+# The policy/analysis/evidence agents return free-form Markdown-ish text
+# (**bold**, "- " bullet lists, blank-line paragraphs) which the Results page
+# used to dump verbatim into a <pre> block — unreadable "wall of asterisks".
+# `_markdown_lite` renders the small subset of Markdown these agents actually
+# use into real HTML for the results.html "agent-report" cards.
+
+_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_MD_BULLET_RE = re.compile(r"^[-*]\s+(.*)")
+_MD_NUMBERED_RE = re.compile(r"^\d+\.\s+(.*)")
+_MD_HEADING_RE = re.compile(r"^#{1,4}\s+(.*)")
+_MD_TABLE_SEP_CELL_RE = re.compile(r"^:?-{1,}:?$")
+
+
+def _markdown_lite_inline(text: str) -> str:
+    return _MD_BOLD_RE.sub(r"<strong>\1</strong>", text)
+
+
+def _split_table_row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _is_table_separator(line: str) -> bool:
+    """A GitHub-flavored-Markdown table separator row, e.g. "|---|---|" or
+    "| :-- | --: |". Every cell must be dashes (with optional leading/
+    trailing colons for alignment) and at least one cell must be present."""
+    if "-" not in line or "|" not in line:
+        return False
+    cells = _split_table_row(line)
+    return bool(cells) and all(_MD_TABLE_SEP_CELL_RE.match(c) for c in cells)
+
+
+def _markdown_lite(text: Optional[str]):
+    """Render a constrained, XSS-safe subset of Markdown as HTML.
+
+    The input is HTML-escaped first, so any `<`/`>`/`&` the agent happened to
+    generate can never form real markup — only the `<p>`/`<ul>`/`<li>`/
+    `<strong>`/`<table>` tags this function itself adds afterward are ever
+    injected.
+    """
+    from markupsafe import Markup, escape
+
+    if not text:
+        return Markup("")
+
+    html_parts: list[str] = []
+    list_buffer: list[str] = []
+    list_type: Optional[str] = None
+    paragraph_buffer: list[str] = []
+
+    def flush_list():
+        nonlocal list_buffer, list_type
+        if list_buffer:
+            tag = list_type or "ul"
+            items = "".join(f"<li>{item}</li>" for item in list_buffer)
+            html_parts.append(f"<{tag}>{items}</{tag}>")
+            list_buffer = []
+            list_type = None
+
+    def flush_paragraph():
+        nonlocal paragraph_buffer
+        if paragraph_buffer:
+            html_parts.append(f"<p>{' '.join(paragraph_buffer)}</p>")
+            paragraph_buffer = []
+
+    lines = str(escape(text)).splitlines()
+    i = 0
+    n = len(lines)
+    while i < n:
+        raw_line = lines[i]
+        line = raw_line.strip()
+        if not line:
+            flush_list()
+            flush_paragraph()
+            i += 1
+            continue
+
+        # A Markdown pipe table: a "| a | b |" header line immediately
+        # followed by a "|---|---|" separator line, then zero or more data
+        # rows in the same pipe format. Rendered as a real <table> so the
+        # per-class stats/detections the prompts now ask for in table form
+        # show up as an actual table, not literal pipe characters.
+        if "|" in line and i + 1 < n and _is_table_separator(lines[i + 1].strip()):
+            flush_list()
+            flush_paragraph()
+            header_cells = _split_table_row(line)
+            i += 2
+            body_rows: list[list[str]] = []
+            while i < n and lines[i].strip() and "|" in lines[i].strip():
+                body_rows.append(_split_table_row(lines[i].strip()))
+                i += 1
+            thead = "<tr>" + "".join(f"<th>{_markdown_lite_inline(c)}</th>" for c in header_cells) + "</tr>"
+            tbody = "".join(
+                "<tr>" + "".join(f"<td>{_markdown_lite_inline(c)}</td>" for c in row) + "</tr>"
+                for row in body_rows
+            )
+            html_parts.append(f"<table class=\"md-table\"><thead>{thead}</thead><tbody>{tbody}</tbody></table>")
+            continue
+
+        m_heading = _MD_HEADING_RE.match(line)
+        if m_heading:
+            flush_list()
+            flush_paragraph()
+            html_parts.append(f"<p class=\"md-heading\"><strong>{_markdown_lite_inline(m_heading.group(1))}</strong></p>")
+            i += 1
+            continue
+
+        m_bullet = _MD_BULLET_RE.match(line)
+        if m_bullet:
+            flush_paragraph()
+            if list_type != "ul":
+                flush_list()
+                list_type = "ul"
+            list_buffer.append(_markdown_lite_inline(m_bullet.group(1)))
+            i += 1
+            continue
+
+        m_numbered = _MD_NUMBERED_RE.match(line)
+        if m_numbered:
+            flush_paragraph()
+            if list_type != "ol":
+                flush_list()
+                list_type = "ol"
+            list_buffer.append(_markdown_lite_inline(m_numbered.group(1)))
+            i += 1
+            continue
+
+        flush_list()
+        paragraph_buffer.append(_markdown_lite_inline(line))
+        i += 1
+
+    flush_list()
+    flush_paragraph()
+    return Markup("".join(html_parts))
+
+
+templates.env.filters["mdlite"] = _markdown_lite
+
+_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n(.*?)\n```$", re.DOTALL)
+
+
+def _parse_ticket_json(raw: Optional[str]) -> Optional[dict]:
+    """Best-effort parse of the ticket agent's text as JSON (it typically
+    returns a ```json fenced``` object) so the Results page can render it as
+    structured fields instead of a raw code block. Returns None (falls back
+    to Markdown rendering) if the text isn't valid JSON."""
+    if not raw:
+        return None
+    text = raw.strip()
+    m = _CODE_FENCE_RE.match(text)
+    if m:
+        text = m.group(1).strip()
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+# General-purpose "at a glance" extraction for free-form agent report text.
+#
+# Earlier revisions tried to pull out domain-specific "Label: value" metric
+# tiles, but that only worked for the gas-detection agent's phrasing — a
+# different use case (e.g. pipeline-defect-detection) produces differently
+# worded reports from a structurally similar prompt (see apps/*/prompts/) and
+# the tiles came out mangled or meaningless. Both current prompts (and any
+# future one following the same POLICY/ANALYSIS/EVIDENCE/TICKETING template)
+# share a structural shape instead of shared vocabulary:
+#   - short title lines and numbered section headings
+#   - one or two explicit, consistently-worded status phrases ("risk level",
+#     "compliance status") that are *requested verbatim by the prompt itself*
+#   - longer prose paragraphs/bullets carrying the actual narrative
+#
+# So instead of parsing out domain words, we (1) pull the one or two
+# universal status badges by anchoring on the prompt's own fixed wording, and
+# (2) build a short "lead summary" by picking out the first sufficiently
+# long, sentence-like line(s) and skipping short headings/titles and
+# compound data-dump rows — this works regardless of which pipeline or
+# vocabulary produced the text.
+
+_RISK_LEVEL_RE = re.compile(r"risk\s+level\W{0,20}(CRITICAL|HIGH|MEDIUM|LOW)", re.IGNORECASE)
+_COMPLIANCE_STATUS_RE = re.compile(r"compliance\s+status\W{0,20}(PASS|FAIL)", re.IGNORECASE)
+
+
+def _extract_badge(text: Optional[str], kind: str) -> Optional[str]:
+    """Pull the Policy agent's "risk level" or the Evidence agent's
+    "compliance status" out of its free-form text, by anchoring on the exact
+    phrase the shared prompt template asks every pipeline's agent to use.
+    Returns None (no badge rendered) if the phrase isn't found."""
+    if not text:
+        return None
+    pattern = _RISK_LEVEL_RE if kind == "risk" else _COMPLIANCE_STATUS_RE
+    m = pattern.search(text)
+    return m.group(1).upper() if m else None
+
+
+def _lead_summary(text: Optional[str], max_chars: int = 260, min_line_words: int = 8) -> str:
+    """Build a short, domain-agnostic "at a glance" teaser from a free-form
+    agent report: concatenate sentence-like lines (skipping short titles,
+    bare numbered headings, bracketed placeholders, and compound data-dump
+    rows) until the character budget is reached."""
+    if not text:
+        return ""
+    plain = text.replace("**", "")
+    collected: list[str] = []
+    total_len = 0
+    truncated = False
+    for raw_line in plain.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        content = re.sub(r"^(?:[-*\u2022]|\d+\.)\s*", "", line).strip()
+        if not content:
+            continue
+        if len(content.split()) < min_line_words:
+            continue
+        first, sep, rest = content.partition(":")
+        if sep and rest.strip().startswith("[") and rest.strip().endswith("]"):
+            # Bracketed placeholder value (e.g. "Timestamp: [To be recorded
+            # at the time of the audit]") — not real narrative content.
+            continue
+        if content.count(":") >= 2:
+            # A compound multi-field record (e.g. a raw per-detection row:
+            # "Frame ID: 0, Confidence: 0.0, Bounding Box: [...]"), not
+            # prose — leave it for the full report.
+            continue
+        if total_len and total_len + len(content) + 1 > max_chars:
+            truncated = True
+            break
+        collected.append(content)
+        total_len += len(content) + 1
+        if total_len >= max_chars:
+            truncated = True
+            break
+
+    if not collected:
+        # Nothing qualified (e.g. an unusually terse report) — fall back to
+        # the first non-empty line so the teaser is never blank.
+        for raw_line in plain.splitlines():
+            line = raw_line.strip()
+            if line:
+                collected = [re.sub(r"^(?:[-*\u2022]|\d+\.)\s*", "", line).strip()]
+                break
+
+    summary = " ".join(collected)
+    if len(summary) > max_chars:
+        summary = summary[:max_chars].rsplit(" ", 1)[0]
+        truncated = True
+    if truncated:
+        summary += "…"
+    return summary
+
+
+# Every pipeline's prompt (see apps/*/prompts/*.txt) now mandates a
+# "Headline:" + "Key Insights:" block at the very top of the Policy,
+# Analysis, and Evidence responses — a structural contract the agent is
+# asked to follow regardless of domain, so this parses the same way for any
+# pipeline built on this blueprint. Because the block comes first, it also
+# survives truncation if the agent's full narrative/data-dump gets cut off
+# near a token limit. Falls back to _lead_summary() when an agent's output
+# doesn't follow the contract (e.g. older cached runs, or a pipeline that
+# hasn't adopted it yet).
+_HEADLINE_RE = re.compile(r"^\*{0,2}\s*headline\s*\*{0,2}\s*:\s*\*{0,2}\s*(.+?)\*{0,2}\s*$", re.IGNORECASE)
+_KEY_INSIGHTS_HEADER_RE = re.compile(r"^\*{0,2}\s*key insights\s*:?\s*\*{0,2}\s*$", re.IGNORECASE)
+_BULLET_RE = re.compile(r"^[-*\u2022]\s*(.+)$")
+
+
+def _extract_headline_block(text: Optional[str]) -> tuple[Optional[str], list[str], str]:
+    """Parse the mandatory Headline/Key Insights block out of an agent's
+    free-form text. Returns (headline, key_insights, remainder) where
+    remainder is the original text with that block's lines removed (so the
+    full-report view doesn't repeat the same recap). If the block isn't
+    found, returns (None, [], text) unchanged."""
+    if not text:
+        return None, [], text or ""
+    lines = text.splitlines()
+    headline: Optional[str] = None
+    insights: list[str] = []
+    remove_indices: set[int] = set()
+    scan_limit = min(len(lines), 30)
+    for idx in range(scan_limit):
+        line = lines[idx].strip()
+        if not line:
+            continue
+        if headline is None:
+            m = _HEADLINE_RE.match(line)
+            if m:
+                headline = m.group(1).strip()
+                remove_indices.add(idx)
+                continue
+        if _KEY_INSIGHTS_HEADER_RE.match(line):
+            remove_indices.add(idx)
+            j = idx + 1
+            while j < len(lines):
+                bullet_line = lines[j].strip()
+                if not bullet_line:
+                    break
+                bm = _BULLET_RE.match(bullet_line)
+                if not bm:
+                    break
+                content = re.sub(r"\*+", "", bm.group(1)).strip()
+                if content:
+                    insights.append(content)
+                remove_indices.add(j)
+                j += 1
+            break
+
+    if not remove_indices:
+        return None, [], text
+
+    remainder = "\n".join(l for i, l in enumerate(lines) if i not in remove_indices).strip()
+    return headline, insights, remainder
+
+
 # ── Chat models and helpers ───────────────────────────────────────────────────
 
 DetectionField = Literal[
@@ -826,6 +1141,35 @@ async def _fetch_run_view(client: httpx.AsyncClient, run_id: str) -> dict:
         result = results_r.json() if results_r.status_code == 200 else {"error": "Result unavailable"}
     except Exception as exc:
         result = {"error": str(exc)}
+
+    ticket = result.get("ticket") if isinstance(result, dict) else None
+    if isinstance(ticket, dict) and ticket.get("mode") != "fallback":
+        ticket["ticket_json"] = _parse_ticket_json(ticket.get("ticket"))
+
+    if isinstance(result, dict):
+        policy = result.get("policy")
+        if isinstance(policy, dict) and policy.get("mode") != "fallback":
+            policy_text = policy.get("policy")
+            headline, insights, remainder = _extract_headline_block(policy_text)
+            policy["risk_badge"] = _extract_badge(policy_text, "risk")
+            policy["headline"] = headline or _lead_summary(policy_text)
+            policy["key_insights"] = insights
+            policy["report_text"] = remainder if headline else policy_text
+        analysis = result.get("analysis")
+        if isinstance(analysis, dict) and analysis.get("mode") != "fallback":
+            analysis_text = analysis.get("report")
+            headline, insights, remainder = _extract_headline_block(analysis_text)
+            analysis["headline"] = headline or _lead_summary(analysis_text)
+            analysis["key_insights"] = insights
+            analysis["report_text"] = remainder if headline else analysis_text
+        evidence = result.get("evidence")
+        if isinstance(evidence, dict) and evidence.get("mode") != "fallback":
+            evidence_text = evidence.get("evidence")
+            headline, insights, remainder = _extract_headline_block(evidence_text)
+            evidence["compliance_badge"] = _extract_badge(evidence_text, "compliance")
+            evidence["headline"] = headline or _lead_summary(evidence_text)
+            evidence["key_insights"] = insights
+            evidence["report_text"] = remainder if headline else evidence_text
 
     return {"phase": agent_status.get("phase"), "result": result}
 
