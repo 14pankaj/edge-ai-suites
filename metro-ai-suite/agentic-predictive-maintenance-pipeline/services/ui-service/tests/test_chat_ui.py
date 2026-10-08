@@ -56,7 +56,7 @@ def test_chat_page_has_accessible_controls(client, respx_mock):
     assert 'id="chat-message"' in response.text
     assert 'id="chat-clear"' in response.text
     assert '<option value="completed-run-id"' in response.text
-    assert "active-run-id" not in response.text
+    assert "active-run-id" in response.text
     assert 'src="/static/js/chat.js"' in response.text
 
 
@@ -74,7 +74,7 @@ def test_chat_page_preselects_requested_completed_run(client, respx_mock):
     response = client.get("/chat?run_id=older-run")
 
     assert response.status_code == 200
-    assert '<option value="older-run" selected>older-run</option>' in response.text
+    assert '<option value="older-run" selected>older-run (completed)</option>' in response.text
 
 
 @pytest.mark.parametrize("path", ["/", "/detections", "/results/example-run"])

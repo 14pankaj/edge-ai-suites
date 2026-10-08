@@ -131,7 +131,7 @@ def test_detections_builds_and_executes_strict_plan(client):
     assert "oneOf" in query_schema
     answer_request = json.loads(llm.calls[1].request.content)
     assert "response_format" not in answer_request
-    assert "numeric count field inside the first data row" in answer_request["messages"][0]["content"]
+    assert "count value from the first data row" in answer_request["messages"][0]["content"]
     assert len(llm.calls) == 2
 
 
