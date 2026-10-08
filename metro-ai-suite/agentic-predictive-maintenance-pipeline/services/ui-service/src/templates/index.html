@@ -206,8 +206,8 @@
       <section class="card">
         <h2>
           Detection Summary
-          <button type="button" class="btn-pill placeholder-btn" disabled
-            title="PLACEHOLDER — no CSV export endpoint yet">&#8681; Export CSV</button>
+          <a class="btn-pill" href="/export/detections.csv" download="detections_export.csv"
+            title="Download all stored detections as CSV">&#8681; Export CSV</a>
         </h2>
         {% if summary and summary.by_class %}
         <table id="detections-table">

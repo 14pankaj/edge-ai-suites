@@ -275,6 +275,7 @@ tr:hover td { background: var(--row-hover); }
   border-radius: 999px;
   color: var(--text-muted);
   cursor: pointer;
+  text-decoration: none;
   transition: border-color 0.15s, color 0.15s;
 }
 .btn-pill:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }

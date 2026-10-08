@@ -18,6 +18,8 @@ shape the templates and ``live-status.js`` already expect, so no detection-
 vs-reasoning plumbing needs to leak into the UI layer itself.
 """
 
+import csv
+import io
 import json
 import logging
 import math
@@ -27,7 +29,7 @@ from typing import Annotated, Any, Literal, Optional, Union
 
 import httpx
 from fastapi import FastAPI, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
@@ -1330,6 +1332,39 @@ async def api_chat(request: ChatRequest):
         mode=request.mode,
         query=query_plan,
         data=_bounded_value(supporting_data),
+    )
+
+
+_DETECTION_CSV_FALLBACK_FIELDS = ["id", "frame_id", "label", "confidence", "x", "y", "width", "height", "timestamp"]
+
+
+@app.get("/export/detections.csv")
+async def export_detections_csv():
+    """Full export of all stored detections as CSV (no run/id filtering).
+
+    Columns are derived from the first row's keys (every row shares the same
+    schema, since storage does `SELECT *` over one fixed table), so
+    use-case-specific additive columns (e.g. multimodal sensor fields) show
+    up automatically without hardcoding them here.
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get(f"{_STORAGE_URL}/detections")
+        r.raise_for_status()
+        detections = r.json()
+
+    fieldnames = list(detections[0].keys()) if detections else _DETECTION_CSV_FALLBACK_FIELDS
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in detections:
+        writer.writerow(row)
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=detections_export.csv"},
     )
 
 
