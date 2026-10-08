@@ -50,6 +50,12 @@ _USE_CASE_ID   = os.environ.get("USE_CASE_ID",           "unknown")
 _MULTIMODAL_CONFIG_PATH = os.environ.get("MULTIMODAL_CONFIG_PATH", "")
 _API_KEY       = os.environ.get("APM_API_KEY",           "")
 _STORAGE_MUTATION_HEADERS = {"X-API-Key": _API_KEY} if _API_KEY else {}
+# Frame rate of the Camera Preview video. The bounding-box overlay matches each
+# detection's own video_time_seconds (DL Streamer's real PTS) against player.currentTime,
+# using this only to size the match tolerance (half a frame interval). 30 matches both the
+# default in scripts/download_and_prep_data.py and the source video's own encoding (confirmed
+# via ffprobe); override with VIDEO_FPS if a use case's video is produced at a different rate.
+_VIDEO_FPS = int(os.environ.get("VIDEO_FPS", "30"))
 _AVAILABLE_DEVICES = [
     device.strip().upper()
     for device in os.environ.get("AVAILABLE_DEVICES", "CPU").split(",")
@@ -67,10 +73,10 @@ _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _DETECTION_PLANNER_PROMPT = """\
 Translate the question into one detection query JSON object. Return JSON only.
 
-Allowed detection fields: id, frame_id, label, confidence, x, y, width, height, timestamp.
+Allowed detection fields: id, frame_id, label, confidence, x, y, width, height, video_time_seconds, detection_timestamp.
 Allowed operations and exact examples:
 - Count: {"operation":"count","filters":[]}
-- List: {"operation":"list","fields":["id","frame_id","label","confidence","timestamp"],"filters":[],"sort":[{"field":"confidence","direction":"desc"}],"limit":10,"offset":0}
+- List: {"operation":"list","fields":["id","frame_id","label","confidence","video_time_seconds","detection_timestamp"],"filters":[],"sort":[{"field":"confidence","direction":"desc"}],"limit":10,"offset":0}
 - Aggregate: {"operation":"aggregate","filters":[],"metrics":[{"function":"avg","field":"confidence","alias":"avg_confidence"}]}
 - Group by label: {"operation":"group_by","group_by":["label"],"filters":[],"metrics":[{"function":"count","alias":"detections"}],"sort":[{"field":"detections","direction":"desc"}],"limit":10,"offset":0}
 - Frame summary: {"operation":"frames","filters":[],"sort":[{"field":"detection_count","direction":"desc"}],"limit":10,"offset":0}
@@ -80,7 +86,7 @@ Allowed operators: eq, ne, gt, gte, lt, lte, in, not_in, between, contains, star
 Aggregate functions: count, avg, min, max, sum. Count has no field; other functions require a
 numeric field. Every metric requires a lowercase alias.
 
-Use group_by when the question says "by", "per", or "for each" label/frame/timestamp. Use list
+Use group_by when the question says "by", "per", or "for each" label/frame/time. Use list
 sorted by confidence descending for highest-confidence or attention questions. Always include
 "frame_id" in a list operation's fields so each detection can be traced back to its source frame.
 Select the operation, fields, filters, grouping, metrics, sorting, and limit requested by the
@@ -94,6 +100,15 @@ app = FastAPI(title="APM UI", docs_url=None, redoc_url=None)
 
 _src_dir = os.path.dirname(__file__)
 app.mount("/static", StaticFiles(directory=os.path.join(_src_dir, "static")), name="static")
+# Read-only mount shared with detection-service in production (set via
+# VIDEOS_DIR to /app/videos); falls back to a local dir so tests/dev runs
+# outside Docker don't need write access to "/app".
+_videos_dir = os.environ.get("VIDEOS_DIR", os.path.join(_src_dir, "..", "videos"))
+try:
+    os.makedirs(_videos_dir, exist_ok=True)
+    app.mount("/media/videos", StaticFiles(directory=_videos_dir), name="videos")
+except OSError as e:
+    log.warning("Camera Preview video mount unavailable (%s): %s", _videos_dir, e)
 templates = Jinja2Templates(directory=os.path.join(_src_dir, "templates"))
 
 
@@ -416,9 +431,12 @@ def _extract_headline_block(text: Optional[str]) -> tuple[Optional[str], list[st
 # ── Chat models and helpers ───────────────────────────────────────────────────
 
 DetectionField = Literal[
-    "id", "frame_id", "label", "confidence", "x", "y", "width", "height", "timestamp"
+    "id", "frame_id", "label", "confidence", "x", "y", "width", "height",
+    "video_time_seconds", "detection_timestamp",
 ]
-NumericField = Literal["id", "frame_id", "confidence", "x", "y", "width", "height"]
+NumericField = Literal[
+    "id", "frame_id", "confidence", "x", "y", "width", "height", "video_time_seconds"
+]
 Scalar = int | float | str
 
 
@@ -478,7 +496,9 @@ class QueryFilter(_StrictModel):
         elif isinstance(self.value, list):
             raise ValueError("this operator requires a scalar value")
 
-        numeric_fields = {"id", "frame_id", "confidence", "x", "y", "width", "height"}
+        numeric_fields = {
+            "id", "frame_id", "confidence", "x", "y", "width", "height", "video_time_seconds"
+        }
         if self.field in numeric_fields:
             if self.operator in {"contains", "starts_with"}:
                 raise ValueError("text operators require a text field")
@@ -512,10 +532,11 @@ class ListQuery(QueryBase):
     operation: Literal["list"]
     fields: list[DetectionField] = Field(
         default_factory=lambda: [
-            "id", "frame_id", "label", "confidence", "x", "y", "width", "height", "timestamp"
+            "id", "frame_id", "label", "confidence", "x", "y", "width", "height",
+            "video_time_seconds", "detection_timestamp",
         ],
         min_length=1,
-        max_length=9,
+        max_length=10,
     )
     sort: list[SortSpec] = Field(
         default_factory=lambda: [SortSpec(field="id", direction="asc")],
@@ -569,7 +590,9 @@ class GroupSortSpec(_StrictModel):
 
 class GroupByQuery(QueryBase):
     operation: Literal["group_by"]
-    group_by: list[Literal["frame_id", "label", "timestamp"]] = Field(min_length=1, max_length=2)
+    group_by: list[Literal[
+        "frame_id", "label", "video_time_seconds", "detection_timestamp"
+    ]] = Field(min_length=1, max_length=2)
     metrics: list[AggregateMetric] = Field(min_length=1, max_length=10)
     sort: list[GroupSortSpec] = Field(default_factory=list, max_length=3)
     limit: int = Field(default=100, ge=1, le=_MAX_RESPONSE_ROWS)
@@ -1215,6 +1238,7 @@ async def index(request: Request):
             "active_run": active_run,
             "videos": videos,
             "devices": _AVAILABLE_DEVICES,
+            "video_fps": _VIDEO_FPS,
             "multimodal_enabled": bool(_MULTIMODAL_CONFIG_PATH),
             "selected_run_id": selected_run["run_id"] if selected_run else None,
             "selected_phase": selected_view["phase"] if selected_view else None,
@@ -1335,7 +1359,10 @@ async def api_chat(request: ChatRequest):
     )
 
 
-_DETECTION_CSV_FALLBACK_FIELDS = ["id", "frame_id", "label", "confidence", "x", "y", "width", "height", "timestamp"]
+_DETECTION_CSV_FALLBACK_FIELDS = [
+    "id", "frame_id", "label", "confidence", "x", "y", "width", "height",
+    "video_time_seconds", "detection_timestamp",
+]
 
 
 @app.get("/export/detections.csv")
@@ -1366,6 +1393,30 @@ async def export_detections_csv():
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=detections_export.csv"},
     )
+
+
+_OVERLAY_FIELDS = (
+    "frame_id", "label", "confidence", "x", "y", "width", "height", "video_time_seconds"
+)
+
+
+@app.get("/api/overlay/detections")
+async def overlay_detections():
+    """Slim video_time_seconds -> bbox feed for the Camera Preview bounding-box overlay.
+
+    Returns every stored detection (no limit) trimmed to just the fields the
+    overlay canvas needs, so camera-preview.js can build a video_time_seconds
+    lookup client-side without pulling detection_timestamp/sensor columns over the wire.
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            r = await client.get(f"{_STORAGE_URL}/detections")
+            r.raise_for_status()
+            detections = r.json()
+        except httpx.HTTPError:
+            detections = []
+
+    return [{k: d.get(k) for k in _OVERLAY_FIELDS} for d in detections]
 
 
 @app.get("/detections", response_class=HTMLResponse)

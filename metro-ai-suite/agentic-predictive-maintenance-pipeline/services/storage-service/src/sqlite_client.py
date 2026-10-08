@@ -27,27 +27,24 @@ logger = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS detections (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    frame_id  INTEGER NOT NULL,
-    label     TEXT    NOT NULL,
-    confidence REAL   NOT NULL,
-    x         REAL    NOT NULL,
-    y         REAL    NOT NULL,
-    width     REAL    NOT NULL,
-    height    REAL    NOT NULL,
-    timestamp TEXT    DEFAULT (datetime('now'))
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    frame_id            INTEGER NOT NULL,
+    label               TEXT    NOT NULL,
+    confidence          REAL    NOT NULL,
+    x                   REAL    NOT NULL,
+    y                   REAL    NOT NULL,
+    width               REAL    NOT NULL,
+    height              REAL    NOT NULL,
+    video_time_seconds  REAL,
+    detection_timestamp TEXT    DEFAULT (datetime('now')),
+    source              TEXT,
+    image_confidence    REAL,
+    sensor_confidence   REAL,
+    sensor_raw_json     TEXT
 );
-
-CREATE INDEX IF NOT EXISTS idx_frame_id   ON detections(frame_id);
-CREATE INDEX IF NOT EXISTS idx_label      ON detections(label);
-CREATE INDEX IF NOT EXISTS idx_confidence ON detections(confidence);
 """
 
-# Additive columns for multimodal (image + sensor fusion) results. Nullable so
-# single-modality video defect-detection rows (frame_id/x/y/width/height only)
-# remain valid and unaffected. Applied via ALTER TABLE (not part of SCHEMA
-# above) so existing databases are migrated in place rather than requiring a
-# drop/recreate.
+# Optional multimodal fields remain nullable for single-modality video results.
 MULTIMODAL_COLUMNS = {
     "source": "TEXT",              # e.g. "gas_detection_multimodal"; NULL for plain video detections
     "image_confidence": "REAL",    # per-branch confidence at the fused label, image modality
@@ -64,7 +61,8 @@ FIELD_SQL = {
     "y": "y",
     "width": "width",
     "height": "height",
-    "timestamp": "timestamp",
+    "video_time_seconds": "video_time_seconds",
+    "detection_timestamp": "detection_timestamp",
     "source": "source",
     "image_confidence": "image_confidence",
     "sensor_confidence": "sensor_confidence",
@@ -111,19 +109,35 @@ class SQLiteClient:
 
     def _init_db(self):
         with self._get_conn() as conn:
-            conn.executescript(SCHEMA)
-            self._migrate_multimodal_columns(conn)
+            conn.execute(SCHEMA)
+            self._migrate_schema(conn)
+            conn.executescript("""
+                CREATE INDEX IF NOT EXISTS idx_frame_id ON detections(frame_id);
+                CREATE INDEX IF NOT EXISTS idx_label ON detections(label);
+                CREATE INDEX IF NOT EXISTS idx_confidence ON detections(confidence);
+            """)
         logger.info("Database initialised at %s", self.db_path)
 
-    def _migrate_multimodal_columns(self, conn: sqlite3.Connection) -> None:
-        """Add multimodal columns to pre-existing databases that predate them.
+    def _migrate_schema(self, conn: sqlite3.Connection) -> None:
+        """Add/rename columns introduced after a database was first created.
 
         SQLite's ``CREATE TABLE IF NOT EXISTS`` never alters an existing
-        table, so a database created before these columns existed needs an
-        explicit ``ALTER TABLE ... ADD COLUMN`` per missing column.
+        table, so a pre-existing database needs explicit migration: a plain
+        ``ALTER TABLE ... ADD COLUMN`` per new column, and a single
+        ``RENAME COLUMN`` for the old ``timestamp`` column. Both have been
+        supported since SQLite 3.25 (2018) — well below the 3.45+ this
+        project runs on — so there's no need to rebuild the table to
+        add/rename columns.
         """
         existing = {row["name"] for row in conn.execute("PRAGMA table_info(detections)")}
-        for column, sql_type in MULTIMODAL_COLUMNS.items():
+
+        if "timestamp" in existing and "detection_timestamp" not in existing:
+            conn.execute("ALTER TABLE detections RENAME COLUMN timestamp TO detection_timestamp")
+            existing.discard("timestamp")
+            existing.add("detection_timestamp")
+
+        new_columns = {"video_time_seconds": "REAL", **MULTIMODAL_COLUMNS}
+        for column, sql_type in new_columns.items():
             if column not in existing:
                 conn.execute(f"ALTER TABLE detections ADD COLUMN {column} {sql_type}")
 
@@ -132,15 +146,16 @@ class SQLiteClient:
                          source: Optional[str] = None,
                          image_confidence: Optional[float] = None,
                          sensor_confidence: Optional[float] = None,
-                         sensor_raw_json: Optional[str] = None) -> int:
+                         sensor_raw_json: Optional[str] = None,
+                         video_time_seconds: Optional[float] = None) -> int:
         sql = """INSERT INTO detections
                     (frame_id, label, confidence, x, y, width, height,
-                     source, image_confidence, sensor_confidence, sensor_raw_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+                     video_time_seconds, source, image_confidence, sensor_confidence, sensor_raw_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
         with self._get_conn() as conn:
             cursor = conn.execute(sql, (
                 frame_id, label, confidence, x, y, width, height,
-                source, image_confidence, sensor_confidence, sensor_raw_json,
+                video_time_seconds, source, image_confidence, sensor_confidence, sensor_raw_json,
             ))
             return cursor.lastrowid
 
@@ -148,16 +163,16 @@ class SQLiteClient:
         """Bulk insert detections.
 
         Each dict must have frame_id, label, confidence, x, y, width, height.
-        The multimodal fields (source, image_confidence, sensor_confidence,
-        sensor_raw_json) are optional and default to NULL when absent.
+        The video time and multimodal fields are optional and default to NULL
+        when absent.
         """
         sql = """INSERT INTO detections
                     (frame_id, label, confidence, x, y, width, height,
-                     source, image_confidence, sensor_confidence, sensor_raw_json)
+                     video_time_seconds, source, image_confidence, sensor_confidence, sensor_raw_json)
                  VALUES (:frame_id, :label, :confidence, :x, :y, :width, :height,
-                         :source, :image_confidence, :sensor_confidence, :sensor_raw_json)"""
-        multimodal_defaults = dict.fromkeys(MULTIMODAL_COLUMNS, None)
-        normalized = [{**multimodal_defaults, **record} for record in records]
+                         :video_time_seconds, :source, :image_confidence, :sensor_confidence, :sensor_raw_json)"""
+        optional_defaults = dict.fromkeys((*MULTIMODAL_COLUMNS, "video_time_seconds"), None)
+        normalized = [{**optional_defaults, **record} for record in records]
         with self._get_conn() as conn:
             conn.executemany(sql, normalized)
             return len(records)

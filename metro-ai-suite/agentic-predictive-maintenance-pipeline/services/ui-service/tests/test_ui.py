@@ -106,7 +106,8 @@ def test_index_running_without_phase_does_not_render_null(client):
 @respx.mock
 def test_detections_page(client):
     detections = [
-        {"frame_id": 1, "label": "Rupture", "confidence": 0.9, "x": 10, "y": 10, "width": 50, "height": 40, "timestamp": "2026-01-01T00:00:00"}
+        {"frame_id": 1, "label": "Rupture", "confidence": 0.9, "x": 10, "y": 10, "width": 50, "height": 40,
+         "video_time_seconds": 1.25, "detection_timestamp": "2026-01-01T00:00:00"}
     ]
     respx.get("http://mock-storage/detections").mock(return_value=httpx.Response(200, json=detections))
     r = client.get("/detections")
@@ -148,7 +149,8 @@ def test_detections_page_shows_modality_columns_when_enabled(client):
     detections = [
         {
             "frame_id": 1, "label": "Smoke", "confidence": 0.95, "x": 0, "y": 0, "width": 0, "height": 0,
-            "timestamp": "2026-01-01T00:00:00", "source": "gas_detection_multimodal",
+            "video_time_seconds": 0.0, "detection_timestamp": "2026-01-01T00:00:00",
+            "source": "gas_detection_multimodal",
             "image_confidence": 0.9, "sensor_confidence": 0.97, "sensor_raw_json": "{}",
         }
     ]

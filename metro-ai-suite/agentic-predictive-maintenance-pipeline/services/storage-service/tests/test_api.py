@@ -41,10 +41,12 @@ def test_insert_detection(client):
     payload = {
         "frame_id": 1, "label": "Rupture", "confidence": 0.92,
         "x": 100, "y": 200, "width": 50, "height": 40,
+        "video_time_seconds": 2.5,
     }
     r = client.post("/detections", json=payload)
     assert r.status_code == 201
     assert r.json()["inserted"] == 1
+    assert client.get("/detections").json()[0]["video_time_seconds"] == 2.5
 
 
 def test_insert_detection_invalid_confidence(client):

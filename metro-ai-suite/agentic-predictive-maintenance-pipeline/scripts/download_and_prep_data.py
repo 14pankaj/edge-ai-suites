@@ -346,12 +346,17 @@ def create_video_from_images(images_dir: Path, video_path: Path, fps: int = 30,
     # pipeline), and GStreamer qtdemux only scans the first 10 MB, so it
     # fails to find a trailing moov. One ffmpeg pass fixes both: re-encode
     # to H.264 (universally playable, still fine for DL Streamer) with
-    # +faststart (moov moved to the front for streaming).
+    # +faststart (moov moved to the front for streaming). This same file is
+    # used both for DL Streamer inference and for the browser Camera Preview
+    # (so overlay timing always matches what was actually detected) — use a
+    # near-lossless CRF so the re-encode doesn't perceptibly shift detection
+    # confidence scores near threshold cutoffs.
     tmp_path = video_path.with_suffix(".faststart.mp4")
     try:
         ret = subprocess.run(
             ["ffmpeg", "-y", "-i", str(video_path),
-             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an",
+             "-c:v", "libx264", "-preset", "slow", "-crf", "15",
+             "-pix_fmt", "yuv420p", "-an",
              "-movflags", "+faststart", str(tmp_path)],
             capture_output=True,
             check=False,

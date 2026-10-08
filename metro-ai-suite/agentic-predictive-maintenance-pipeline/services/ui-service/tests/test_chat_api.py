@@ -189,7 +189,7 @@ def test_detection_query_canonicalizes_shipping_label(client, monkeypatch):
     )
     llm = respx.post("http://mock-llm/v3/chat/completions").mock(side_effect=[
         _llm_response(
-            '{"operation":"list","fields":["label","confidence","timestamp"],'
+            '{"operation":"list","fields":["label","confidence","detection_timestamp"],'
             '"filters":[],'
             '"sort":[{"field":"confidence","direction":"desc"}],"limit":10,"offset":0}'
         ),

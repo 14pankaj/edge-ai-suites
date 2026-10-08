@@ -9,18 +9,21 @@ from typing import Annotated, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 DetectionField = Literal[
-    "id", "frame_id", "label", "confidence", "x", "y", "width", "height", "timestamp"
+    "id", "frame_id", "label", "confidence", "x", "y", "width", "height",
+    "video_time_seconds", "detection_timestamp",
 ]
-GroupField = Literal["frame_id", "label", "timestamp"]
-NumericField = Literal["id", "frame_id", "confidence", "x", "y", "width", "height"]
+GroupField = Literal["frame_id", "label", "video_time_seconds", "detection_timestamp"]
+NumericField = Literal[
+    "id", "frame_id", "confidence", "x", "y", "width", "height", "video_time_seconds"
+]
 FilterOperator = Literal[
     "eq", "ne", "gt", "gte", "lt", "lte", "in", "not_in", "between",
     "contains", "starts_with",
 ]
 Scalar = int | float | str
 
-NUMERIC_FIELDS = {"id", "frame_id", "confidence", "x", "y", "width", "height"}
-TEXT_FIELDS = {"label", "timestamp"}
+NUMERIC_FIELDS = {"id", "frame_id", "confidence", "x", "y", "width", "height", "video_time_seconds"}
+TEXT_FIELDS = {"label", "detection_timestamp"}
 COMPARISON_OPERATORS = {"eq", "ne", "gt", "gte", "lt", "lte"}
 SEQUENCE_OPERATORS = {"in", "not_in"}
 TEXT_OPERATORS = {"contains", "starts_with"}
@@ -86,10 +89,11 @@ class ListQuery(QueryBase):
     operation: Literal["list"]
     fields: list[DetectionField] = Field(
         default_factory=lambda: [
-            "id", "frame_id", "label", "confidence", "x", "y", "width", "height", "timestamp"
+            "id", "frame_id", "label", "confidence", "x", "y", "width", "height",
+            "video_time_seconds", "detection_timestamp",
         ],
         min_length=1,
-        max_length=9,
+        max_length=10,
     )
     sort: list[SortSpec] = Field(
         default_factory=lambda: [SortSpec(field="id", direction="asc")],

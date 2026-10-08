@@ -89,7 +89,7 @@
               </label>
               <label class="config-field">
                 <span>Video</span>
-                <select name="video_filename">
+                <select name="video_filename" id="video-select">
                   {% if videos %}
                     {% for v in videos %}
                     <option value="{{ v }}">{{ v }}</option>
@@ -148,15 +148,20 @@
 
     <!-- ── Center column: live preview, recent frames, detection summary ── -->
     <div class="dash-col dash-col-center">
-      <section class="card placeholder-card">
-        <h2>Camera Preview
-          <span class="placeholder-badge" title="No frame-image backend yet — this is a design placeholder">PLACEHOLDER</span>
-        </h2>
-        <div class="camera-preview-box">
-          <span>Live frame + bounding-box overlay will render here once the detection-service
-            exposes a frame-image endpoint.</span>
+      <section class="card">
+        <h2>Camera Preview</h2>
+        <div class="camera-preview-box camera-preview-box-video" id="camera-preview-wrap" data-video-fps="{{ video_fps }}">
+          <video id="camera-preview-player" controls muted
+            {% if videos and videos[0] %}src="/media/videos/{{ videos[0] | urlencode }}"{% endif %}>
+            Your browser does not support the video tag.
+          </video>
+          <canvas id="camera-preview-overlay"></canvas>
         </div>
-        <p class="status-note">Requires a backend change (see follow-up) to serve frame images.</p>
+        {% if multimodal_enabled %}
+        <p class="status-note">Dataset preview video (stitched from the inspected image samples) — boxes show each inference's detected defect.</p>
+        {% else %}
+        <p class="status-note">Shows the video currently selected above with detection bounding boxes overlaid as it plays.</p>
+        {% endif %}
       </section>
 
       <section class="card placeholder-card">
@@ -307,5 +312,6 @@
   <script src="/static/js/metrics.js"></script>
   <script src="/static/js/system-capabilities.js"></script>
   <script src="/static/js/run-select.js"></script>
+  <script src="/static/js/camera-preview.js"></script>
 </body>
 </html>

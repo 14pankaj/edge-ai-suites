@@ -23,7 +23,8 @@ def test_extract_classification_reads_label_confidence_and_probabilities():
     }
     record = _extract_classification(payload)
     assert record == {
-        "frame_id": 100, "label": "Smoke", "confidence": 0.87,
+        "frame_id": 100, "video_time_seconds": 3.33333333,
+        "label": "Smoke", "confidence": 0.87,
         "probabilities": [0.02, 0.05, 0.06, 0.87],
     }
 

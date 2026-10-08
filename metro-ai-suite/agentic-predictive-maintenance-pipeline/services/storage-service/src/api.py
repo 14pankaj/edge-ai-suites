@@ -81,6 +81,9 @@ class Detection(BaseModel):
     y: float = Field(..., description="Bounding box center Y")
     width: float = Field(..., description="Bounding box width")
     height: float = Field(..., description="Bounding box height")
+    video_time_seconds: Optional[float] = Field(
+        None, ge=0.0, description="Source video timestamp in seconds"
+    )
     # Additive multimodal fields — optional/NULL for plain video defect
     # detections. Populated for fused image+sensor classification results
     # (e.g. the gas-detection use case), which have no bounding box.
@@ -122,6 +125,7 @@ def insert_detection(detection: Detection, _auth: None = Depends(require_api_key
         image_confidence=detection.image_confidence,
         sensor_confidence=detection.sensor_confidence,
         sensor_raw_json=detection.sensor_raw_json,
+        video_time_seconds=detection.video_time_seconds,
     )
     return {"inserted": 1}
 
