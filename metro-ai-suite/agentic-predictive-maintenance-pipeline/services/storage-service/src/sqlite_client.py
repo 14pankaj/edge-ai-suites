@@ -7,6 +7,8 @@ SQLite client for persisting and querying defect detections.
 
 import sqlite3
 import logging
+
+import math
 import os
 from typing import Optional
 
@@ -310,6 +312,13 @@ class SQLiteClient:
             },
         }
 
+    @staticmethod
+    def _percentile(sorted_values: list[float], p: float) -> float:
+        """Nearest-rank percentile (p in (0, 100]) over an already-sorted list."""
+        n = len(sorted_values)
+        rank = min(n, max(1, math.ceil(p / 100 * n)))
+        return sorted_values[rank - 1]
+
     def get_summary(self, min_id: Optional[int] = None,
                     max_id: Optional[int] = None) -> dict:
         """Return per-class detection counts and confidence stats.
@@ -340,9 +349,23 @@ class SQLiteClient:
         GROUP BY label
         ORDER BY count DESC
         """
+        confidence_sql = f"""
+        SELECT label, confidence
+        FROM detections
+        {where}
+        ORDER BY label, confidence
+        """
         with self._get_conn() as conn:
-            rows = conn.execute(sql, params).fetchall()
-        return {"by_class": [dict(r) for r in rows]}
+            rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+            confidences_by_label: dict[str, list[float]] = {}
+            for r in conn.execute(confidence_sql, params).fetchall():
+                confidences_by_label.setdefault(r["label"], []).append(r["confidence"])
+
+        for row in rows:
+            values = confidences_by_label.get(row["label"], [])
+            row["p90_confidence"] = self._percentile(values, 90) if values else None
+            row["p99_confidence"] = self._percentile(values, 99) if values else None
+        return {"by_class": rows}
 
     def get_max_id(self) -> int:
         """Return the highest detection id currently stored (0 if empty)."""

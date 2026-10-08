@@ -26,6 +26,8 @@ function renderDetectionsRows(byClass) {
         <td>${cls.count}</td>
         <td>${Number(cls.avg_confidence).toFixed(3)}</td>
         <td>${Number(cls.max_confidence).toFixed(3)}</td>
+        <td>${cls.p90_confidence != null ? Number(cls.p90_confidence).toFixed(3) : "—"}</td>
+        <td>${cls.p99_confidence != null ? Number(cls.p99_confidence).toFixed(3) : "—"}</td>
       </tr>`
     )
     .join("");
