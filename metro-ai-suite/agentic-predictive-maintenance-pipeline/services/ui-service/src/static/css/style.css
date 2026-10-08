@@ -516,6 +516,16 @@ footer {
   padding: 1.5rem;
   font-size: 0.85rem;
 }
+.camera-preview-box-video { padding: 0; overflow: hidden; position: relative; }
+.camera-preview-box-video video { width: 100%; max-height: 360px; display: block; }
+.camera-preview-box-video canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
 
 /* Recent Defect Frames — horizontally scrollable thumbnail strip: roughly
    3-4 thumbnails visible at rest, 2-3 visible once scrolled (per approved
