@@ -1148,13 +1148,14 @@ async def _fetch_run_view(client: httpx.AsyncClient, run_id: str) -> dict:
     # Raw run-info fields as reported by detection-service — formatted for
     # display by _format_run_info() once this reaches the results_page route.
     # Threaded through every return branch below so the run-info-strip has
-    # something to show immediately (start_time/device are known from the
-    # moment the run starts), not just once the run fully completes.
+    # something to show immediately (start_time is known from the moment the
+    # run starts), not just once the run fully completes. device/video_filename
+    # aren't included here — detection-service still records them (needed to
+    # actually run DL Streamer / for ops visibility via /detection/status),
+    # but _format_run_info() has no field that displays them.
     run_info = {
         "start_time": det.get("start_time"),
         "duration_seconds": det.get("duration_seconds"),
-        "device": det.get("device"),
-        "video_filename": det.get("video_filename"),
         "config_path": det.get("config_path"),
         "fusion_weights": det.get("fusion_weights"),
     }
