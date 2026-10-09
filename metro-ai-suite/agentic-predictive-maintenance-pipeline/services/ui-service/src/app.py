@@ -25,6 +25,7 @@ import logging
 import math
 import os
 import re
+from datetime import datetime, timezone
 from typing import Annotated, Any, Literal, Optional, Union
 
 import httpx
@@ -1137,19 +1138,33 @@ async def _fetch_videos(client: httpx.AsyncClient):
 
 
 async def _fetch_run_view(client: httpx.AsyncClient, run_id: str) -> dict:
-    """Return the merged ``{"phase", "result"}`` view of one run for the results page."""
+    """Return the merged ``{"phase", "result", "run_info"}`` view of one run for the results page."""
     det_r = await client.get(f"{_DETECTION_URL}/detection/status/{run_id}")
     if det_r.status_code == 404:
         raise HTTPException(status_code=404, detail="Run not found")
     det = det_r.json() if det_r.status_code == 200 else {}
     det_phase = det.get("phase")
 
+    # Raw run-info fields as reported by detection-service — formatted for
+    # display by _format_run_info() once this reaches the results_page route.
+    # Threaded through every return branch below so the run-info-strip has
+    # something to show immediately (start_time/device are known from the
+    # moment the run starts), not just once the run fully completes.
+    run_info = {
+        "start_time": det.get("start_time"),
+        "duration_seconds": det.get("duration_seconds"),
+        "device": det.get("device"),
+        "video_filename": det.get("video_filename"),
+        "config_path": det.get("config_path"),
+        "fusion_weights": det.get("fusion_weights"),
+    }
+
     if det_phase == "detecting":
-        return {"phase": "detecting", "result": {"status": "running"}}
+        return {"phase": "detecting", "result": {"status": "running"}, "run_info": run_info}
 
     if det_phase == "error":
         error = (det.get("result") or {}).get("error", "Detection run failed")
-        return {"phase": "error", "result": {"status": "error", "error": error}}
+        return {"phase": "error", "result": {"status": "error", "error": error}, "run_info": run_info}
 
     # Detection completed — reasoning is owned by the agent-service from here.
     try:
@@ -1159,11 +1174,14 @@ async def _fetch_run_view(client: httpx.AsyncClient, run_id: str) -> dict:
 
     if status_r is None or status_r.status_code == 404:
         # batch-complete event not yet processed by the agent-service
-        return {"phase": "reasoning", "result": {"status": "running"}}
+        return {"phase": "reasoning", "result": {"status": "running"}, "run_info": run_info}
 
     agent_status = status_r.json()
     if agent_status.get("status") == "running":
-        return {"phase": agent_status.get("phase", "reasoning"), "result": {"status": "running"}}
+        return {
+            "phase": agent_status.get("phase", "reasoning"), "result": {"status": "running"},
+            "run_info": run_info,
+        }
 
     try:
         results_r = await client.get(f"{_AGENT_URL}/agents/results/{run_id}")
@@ -1200,7 +1218,49 @@ async def _fetch_run_view(client: httpx.AsyncClient, run_id: str) -> dict:
             evidence["key_insights"] = insights
             evidence["report_text"] = remainder if headline else evidence_text
 
-    return {"phase": agent_status.get("phase"), "result": result}
+    return {"phase": agent_status.get("phase"), "result": result, "run_info": run_info}
+
+
+def _format_run_info(run_info: dict) -> dict:
+    """Convert raw run_info (epoch seconds, raw paths/weights) into the
+    display-ready strings the results-page run-info-strip renders.
+
+    A run is "multimodal" (fused image+sensor classification) when it has a
+    ``config_path`` or ``fusion_weights`` — plain detection runs only ever
+    set ``video_filename``. This single check drives the "Modality" tag list
+    (rendered as oval chips, same style as the Ask & Analyze page's prompt
+    chips — 1 chip for single-modality video, 2 for fused image+sensor
+    multimodal), the "Process" field (what kind of inference ran:
+    Detection/Classification — Segmentation would land here too if a future
+    pipeline adds it), and the dynamic duration label (duration never
+    includes agent-service reasoning time, so it must say what stage it
+    timed).
+    """
+    is_multimodal = bool(run_info.get("config_path") or run_info.get("fusion_weights"))
+
+    start_time = run_info.get("start_time")
+    start_time_display = (
+        datetime.fromtimestamp(start_time, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        if start_time is not None else "—"
+    )
+
+    duration_seconds = run_info.get("duration_seconds")
+    duration_display = f"{duration_seconds:.1f}s" if duration_seconds is not None else "—"
+
+    modality_tags = ["Image", "Sensor"] if is_multimodal else ["Video"]
+    # Today every pipeline is either plain DL Streamer detection (gvadetect)
+    # or fused image+sensor classification (gvaclassify, full-frame — see
+    # gas-detection's pipeline-server-config.json). Segmentation isn't wired
+    # up yet, but this field's wording is kept generic for when it is.
+    process_display = "Classification" if is_multimodal else "Detection"
+
+    return {
+        "modality_tags": modality_tags,
+        "process_display": process_display,
+        "start_time_display": start_time_display,
+        "duration_label": "Classification Duration" if is_multimodal else "Detection Duration",
+        "duration_display": duration_display,
+    }
 
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
@@ -1423,7 +1483,7 @@ async def overlay_detections():
 async def recent_frames(limit: int = 6):
     """Most recently stored detections, newest first.
 
-    Feeds the dashboard's "Recent Defect Frames" gallery: recent-frames.js
+    Feeds the dashboard's "Recent Processed Frames" gallery: recent-frames.js
     seeks the already-loaded Camera Preview video to each detection's
     ``video_time_seconds`` and draws the frame + bbox onto a thumbnail
     canvas client-side — there's no per-frame image stored server-side, so
@@ -1547,6 +1607,7 @@ async def results_page(request: Request, run_id: str):
         context={
             "use_case_id": _USE_CASE_ID, "run_id": run_id,
             "result": view["result"], "phase": view["phase"],
+            "run_info": _format_run_info(view.get("run_info") or {}),
             "multimodal_enabled": bool(_MULTIMODAL_CONFIG_PATH),
         },
     )

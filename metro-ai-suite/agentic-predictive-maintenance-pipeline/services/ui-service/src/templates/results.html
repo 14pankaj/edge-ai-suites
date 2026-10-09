@@ -58,12 +58,17 @@
     <div class="results-title-row">
       <div>
         <h2>Run Results</h2>
-        {% if not result.get("status") == "running" and not result.get("error") %}
-        <p class="status-note">Reported follow-up frames (if any) are unverified references, not run detections.</p>
-        {% endif %}
       </div>
       <a href="/" class="btn-primary">&larr; Back to Dashboard</a>
     </div>
+
+    <section class="run-info-strip">
+      <div class="run-info-id"><span class="run-info-label">Run ID</span><span class="run-info-value"><code>{{ run_id }}</code></span></div>
+      <div><span class="run-info-label">Modality</span><span class="run-info-value modality-tags">{% for tag in run_info.modality_tags %}<span class="modality-tag">{{ tag }}</span>{% endfor %}</span></div>
+      <div><span class="run-info-label">Process</span><span class="run-info-value">{{ run_info.process_display }}</span></div>
+      <div><span class="run-info-label">Start Time</span><span class="run-info-value">{{ run_info.start_time_display }}</span></div>
+      <div><span class="run-info-label">{{ run_info.duration_label }}</span><span class="run-info-value">{{ run_info.duration_display }}</span></div>
+    </section>
 
     {% if result.get("status") == "running" %}
       <section class="card">
@@ -99,14 +104,6 @@
       </section>
 
     {% else %}
-      <section class="run-info-strip placeholder-card">
-        <div><span class="run-info-label">Run ID</span><span class="run-info-value"><code>{{ run_id }}</code></span></div>
-        <div><span class="run-info-label">Start Time <span class="placeholder-badge" title="PLACEHOLDER — not tracked by the backend yet">PLACEHOLDER</span></span><span class="run-info-value">—</span></div>
-        <div><span class="run-info-label">Detection Duration <span class="placeholder-badge" title="PLACEHOLDER — not tracked by the backend yet">PLACEHOLDER</span></span><span class="run-info-value">—</span></div>
-        <div><span class="run-info-label">Video Source <span class="placeholder-badge" title="PLACEHOLDER — submitted at run start but not persisted/returned with results yet">PLACEHOLDER</span></span><span class="run-info-value">—</span></div>
-        <div><span class="run-info-label">Device <span class="placeholder-badge" title="PLACEHOLDER — submitted at run start but not persisted/returned with results yet">PLACEHOLDER</span></span><span class="run-info-value">—</span></div>
-      </section>
-
       <div class="results-accent-grid">
 
         {% set p = result.get("policy") %}

@@ -29,6 +29,7 @@ from .utility.dlstreamer_client import (
     run_pipeline_to_completion,
     list_available_videos,
     PipelineRunError,
+    DEFAULT_VIDEO_FILENAME,
 )
 from .utility.multimodal_runner import (
     load_config,
@@ -47,6 +48,18 @@ log = logging.getLogger(__name__)
 # run: "detecting" -> "completed" / "error". The agent-service maintains its
 # own store for the reasoning half, correlated by the same run_id.
 _runs: dict[str, dict] = {}
+
+
+def _with_duration(run: dict) -> dict:
+    """Return a shallow copy of ``run`` with a derived ``duration_seconds`` added.
+
+    Key is omitted until the run ends (success or error), i.e. has ``end_time``.
+    """
+    view = dict(run)
+    start_time, end_time = view.get("start_time"), view.get("end_time")
+    if start_time is not None and end_time is not None:
+        view["duration_seconds"] = end_time - start_time
+    return view
 
 _DETECTION_TIMEOUT = float(os.environ.get("DLSTREAMER_RUN_TIMEOUT", "600"))
 
@@ -130,7 +143,14 @@ async def trigger_detection_run(req: DetectionRunRequest, background_tasks: Back
 
     run_id = str(uuid.uuid4())
     _active_run_id = run_id
-    _runs[run_id] = {"status": "running", "phase": "detecting", "result": None}
+    _runs[run_id] = {
+        "status": "running", "phase": "detecting", "result": None,
+        "start_time": time.time(), "device": device,
+        # Record the video filename actually used by DL Streamer — when the
+        # caller omits one, that's DEFAULT_VIDEO_FILENAME, not None, so the
+        # UI's "Video Source" field reflects reality instead of showing "—".
+        "video_filename": req.video_filename or DEFAULT_VIDEO_FILENAME,
+    }
     background_tasks.add_task(_execute_detection_run, run_id, device, req.video_filename)
     return DetectionRunResponse(run_id=run_id, status="running")
 
@@ -140,13 +160,13 @@ def get_status(run_id: str):
     """Return the status, phase, and (once known) result of a detection run."""
     if run_id not in _runs:
         raise HTTPException(status_code=404, detail="Run not found")
-    return {"run_id": run_id, **_runs[run_id]}
+    return {"run_id": run_id, **_with_duration(_runs[run_id])}
 
 
 @app.get("/detection/runs")
 def list_runs():
     """List all detection runs with their status/phase."""
-    return [{"run_id": k, **v} for k, v in _runs.items()]
+    return [{"run_id": k, **_with_duration(v)} for k, v in _runs.items()]
 
 
 @app.get("/detection/videos")
@@ -180,7 +200,10 @@ async def trigger_multimodal_run(req: MultimodalRunRequest, background_tasks: Ba
 
     run_id = str(uuid.uuid4())
     _active_run_id = run_id
-    _runs[run_id] = {"status": "running", "phase": "classifying", "result": None}
+    _runs[run_id] = {
+        "status": "running", "phase": "classifying", "result": None,
+        "start_time": time.time(), "device": device, "config_path": req.config_path,
+    }
     background_tasks.add_task(_execute_multimodal_run, run_id, device, req.config_path)
     return DetectionRunResponse(run_id=run_id, status="running")
 
@@ -261,6 +284,15 @@ def _execute_multimodal_run(run_id: str, device: str, config_path: str):
         log.info("Run %s: starting multimodal classification (device=%s, config=%s)...",
                   run_id, device, config_path)
         config = load_config(config_path)
+        # Now that the config is loaded, record what the run actually used:
+        # the resolved video (explicit override, else the same default DL
+        # Streamer uses) and the fusion weights, so the UI's run-info-strip
+        # can show "Modality: Image (60%), Sensor (40%)" instead of just the
+        # raw config path.
+        _runs[run_id].update({
+            "video_filename": config.get("video_filename") or DEFAULT_VIDEO_FILENAME,
+            "fusion_weights": config.get("fusion_weights"),
+        })
         results = run_multimodal_classification(config, device=device)
         source_tag = config.get("source_tag", "multimodal")
         inserted = persist_results(results, source_tag, storage_client.post_detection)
@@ -274,7 +306,7 @@ def _execute_multimodal_run(run_id: str, device: str, config_path: str):
             end_id = None
 
         result = {"samples": len(results), "inserted": inserted, "start_id": start_id, "end_id": end_id}
-        _runs[run_id] = {"status": "completed", "phase": "completed", "result": result}
+        _runs[run_id].update({"status": "completed", "phase": "completed", "result": result, "end_time": time.time()})
         publish_batch_complete({
             "run_id": run_id, "status": "completed", "device": device,
             "config_path": config_path, "start_id": start_id, "end_id": end_id,
@@ -284,7 +316,7 @@ def _execute_multimodal_run(run_id: str, device: str, config_path: str):
 
     except MultimodalRunError as exc:
         log.error("Run %s failed during multimodal classification: %s", run_id, exc)
-        _runs[run_id] = {"status": "error", "phase": "error", "result": {"error": str(exc)}}
+        _runs[run_id].update({"status": "error", "phase": "error", "result": {"error": str(exc)}, "end_time": time.time()})
         publish_batch_complete({
             "run_id": run_id, "status": "error", "device": device,
             "config_path": config_path, "start_id": None, "end_id": None,
@@ -292,7 +324,7 @@ def _execute_multimodal_run(run_id: str, device: str, config_path: str):
         })
     except Exception as exc:
         log.error("Run %s failed: %s", run_id, exc)
-        _runs[run_id] = {"status": "error", "phase": "error", "result": {"error": str(exc)}}
+        _runs[run_id].update({"status": "error", "phase": "error", "result": {"error": str(exc)}, "end_time": time.time()})
         publish_batch_complete({
             "run_id": run_id, "status": "error", "device": device,
             "config_path": config_path, "start_id": None, "end_id": None,
@@ -339,7 +371,7 @@ def _execute_detection_run(run_id: str, device: str, video_filename: str | None)
             end_id = None
 
         result = {"pipeline_status": pipeline_status, "start_id": start_id, "end_id": end_id}
-        _runs[run_id] = {"status": "completed", "phase": "completed", "result": result}
+        _runs[run_id].update({"status": "completed", "phase": "completed", "result": result, "end_time": time.time()})
         publish_batch_complete({
             "run_id": run_id, "status": "completed", "device": device,
             "video_filename": video_filename, "start_id": start_id, "end_id": end_id,
@@ -349,7 +381,7 @@ def _execute_detection_run(run_id: str, device: str, video_filename: str | None)
 
     except PipelineRunError as exc:
         log.error("Run %s failed during detection: %s", run_id, exc)
-        _runs[run_id] = {"status": "error", "phase": "error", "result": {"error": str(exc)}}
+        _runs[run_id].update({"status": "error", "phase": "error", "result": {"error": str(exc)}, "end_time": time.time()})
         publish_batch_complete({
             "run_id": run_id, "status": "error", "device": device,
             "video_filename": video_filename, "start_id": start_id, "end_id": None,
@@ -357,7 +389,7 @@ def _execute_detection_run(run_id: str, device: str, video_filename: str | None)
         })
     except Exception as exc:
         log.error("Run %s failed: %s", run_id, exc)
-        _runs[run_id] = {"status": "error", "phase": "error", "result": {"error": str(exc)}}
+        _runs[run_id].update({"status": "error", "phase": "error", "result": {"error": str(exc)}, "end_time": time.time()})
         publish_batch_complete({
             "run_id": run_id, "status": "error", "device": device,
             "video_filename": video_filename, "start_id": None, "end_id": None,

@@ -83,7 +83,6 @@
 
     function drawBoxesForCurrentFrame(videoTime = player.currentTime) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (player.paused && player.ended) return;
 
       const boxes = boxesForVideoTime(videoTime);
       if (!boxes || !boxes.length) return;
@@ -99,12 +98,22 @@
       for (const box of boxes) {
         const { x, y, width, height, label, confidence } = box;
         if ([x, y, width, height].some((v) => typeof v !== "number")) continue;
-        // Whole-frame classification results (e.g. gas-detection's multimodal
-        // runner) always post width=height=0 — there's no real bbox, so skip
-        // drawing a meaningless zero-size mark at the corner.
-        if (width <= 0 || height <= 0) continue;
-        ctx.strokeRect(x, y, width, height);
         const text = confidence != null ? `${label} ${(confidence * 100).toFixed(0)}%` : String(label);
+        // Whole-frame classification results (e.g. gas-detection's multimodal
+        // runner) always post width=height=0 — there's no real bbox to draw,
+        // so show the same "label confidence%" text as a banner across the
+        // top of the frame instead of a rectangle.
+        if (width <= 0 || height <= 0) {
+          const padding = Math.max(6, canvas.width / 80);
+          const textWidth = ctx.measureText(text).width;
+          ctx.fillRect(0, 0, textWidth + padding * 2, Math.max(24, canvas.width / 30));
+          const savedFill = ctx.fillStyle;
+          ctx.fillStyle = "#0b1220";
+          ctx.fillText(text, padding, Math.max(24, canvas.width / 30) - padding / 2);
+          ctx.fillStyle = savedFill;
+          continue;
+        }
+        ctx.strokeRect(x, y, width, height);
         const textY = y > 16 ? y - 4 : y + 16;
         ctx.fillText(text, x, textY);
       }
