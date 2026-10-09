@@ -163,6 +163,11 @@ def run_multimodal_classification(config: dict, device: str = "CPU") -> list[dic
     if not image_probs:
         raise MultimodalRunError("No collected classifications could be matched to a manifest frame")
     sample_ids = list(image_probs.keys())
+    video_times_by_sample = {
+        manifest[record["frame_id"]]: record.get("video_time_seconds")
+        for record in classifications
+        if record["frame_id"] in manifest
+    }
 
     sensor_clf = SensorMLPClassifier(
         model_path=config["sensor_model_path"],
@@ -179,6 +184,8 @@ def run_multimodal_classification(config: dict, device: str = "CPU") -> list[dic
         sample_ids[i]: {k: v for k, v in r.items() if k == "sensor_raw_json"}
         for i, r in enumerate(sensor_results)
     }
+    for sample_id in sample_ids:
+        metadata[sample_id]["video_time_seconds"] = video_times_by_sample.get(sample_id)
 
     return late_fusion(
         branch_probs={"image": image_probs, "sensor": sensor_probs},
@@ -204,6 +211,7 @@ def persist_results(results: list[dict], source_tag: str, post_detection_fn) -> 
             "label": result["label"],
             "confidence": result["confidence"],
             "x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0,
+            "video_time_seconds": result.get("video_time_seconds"),
             "source": source_tag,
             "image_confidence": result.get("image_confidence"),
             "sensor_confidence": result.get("sensor_confidence"),

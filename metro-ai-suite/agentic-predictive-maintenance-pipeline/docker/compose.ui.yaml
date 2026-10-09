@@ -29,11 +29,18 @@ services:
       # Set (in .env_<use-case>) for dataset+sensor use cases with no live video pipeline
       # (e.g. gas-detection) to enable the "Run Multimodal Detection" button.
       MULTIMODAL_CONFIG_PATH: ${MULTIMODAL_CONFIG_PATH:-}
+      # Shared source-video directory (same mount as detection-service), served
+      # read-only under /media/videos/ for the Camera Preview player.
+      VIDEOS_DIR: /app/videos
       HOST: 0.0.0.0
       PORT: 5003
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "${UI_PORT:-5003}:5003"
+    volumes:
+      # Same read-only mount as detection-service, so the Camera Preview
+      # player can serve the exact video file under inspection.
+      - ${USE_CASE_RESOURCES_DIR:-/tmp/resources}/videos:/app/videos:ro
     depends_on:
       apm-agent:
         condition: service_healthy

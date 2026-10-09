@@ -40,7 +40,10 @@ _TIMEOUT = 5
 # GStreamer parse error: "no element auto_source". Always fall back to this
 # filename (every use case's sample video, see
 # scripts/download_and_prep_data.py) so a "source" is always present.
-_DEFAULT_VIDEO_FILENAME = os.environ.get("DLSTREAMER_DEFAULT_VIDEO", "datastream.mp4")
+# Public (no leading underscore) so callers outside this module — e.g.
+# main.py, when recording run metadata — can resolve the effective video
+# filename without reaching into a private name.
+DEFAULT_VIDEO_FILENAME = os.environ.get("DLSTREAMER_DEFAULT_VIDEO", "datastream.mp4")
 
 # Maps a UI-selectable device name to the pipeline definition that runs
 # gvadetect on that device (see configs/pipeline-server-config.json).
@@ -105,7 +108,7 @@ def _start_pipeline(
         }
     }
     payload["source"] = {
-        "uri": f"file://{_DLSTREAMER_VIDEOS_PATH}/{video_filename or _DEFAULT_VIDEO_FILENAME}",
+        "uri": f"file://{_DLSTREAMER_VIDEOS_PATH}/{video_filename or DEFAULT_VIDEO_FILENAME}",
         "type": "uri",
     }
 

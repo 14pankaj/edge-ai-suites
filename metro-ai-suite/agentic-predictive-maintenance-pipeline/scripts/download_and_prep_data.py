@@ -340,13 +340,23 @@ def create_video_from_images(images_dir: Path, video_path: Path, fps: int = 30,
         print(f"   ❌ Video was not written to {video_path}.")
         return False
 
-    # cv2 mp4v writer places the moov atom at the end of the file.
-    # GStreamer qtdemux only scans the first 10 MB, so it fails to find moov.
-    # Repack with ffmpeg -movflags +faststart to move moov to the front.
+    # cv2's mp4v writer uses MPEG-4 Part 2 (not H.264) and places the moov
+    # atom at the end of the file. Browsers' <video> tag can't decode
+    # MPEG-4 Part 2 at all (only used for the GStreamer/DL Streamer
+    # pipeline), and GStreamer qtdemux only scans the first 10 MB, so it
+    # fails to find a trailing moov. One ffmpeg pass fixes both: re-encode
+    # to H.264 (universally playable, still fine for DL Streamer) with
+    # +faststart (moov moved to the front for streaming). This same file is
+    # used both for DL Streamer inference and for the browser Camera Preview
+    # (so overlay timing always matches what was actually detected) — use a
+    # near-lossless CRF so the re-encode doesn't perceptibly shift detection
+    # confidence scores near threshold cutoffs.
     tmp_path = video_path.with_suffix(".faststart.mp4")
     try:
         ret = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(video_path), "-c", "copy",
+            ["ffmpeg", "-y", "-i", str(video_path),
+             "-c:v", "libx264", "-preset", "slow", "-crf", "15",
+             "-pix_fmt", "yuv420p", "-an",
              "-movflags", "+faststart", str(tmp_path)],
             capture_output=True,
             check=False,
@@ -356,7 +366,7 @@ def create_video_from_images(images_dir: Path, video_path: Path, fps: int = 30,
             tmp_path.replace(video_path)
         else:
             tmp_path.unlink(missing_ok=True)
-            print("   ⚠️  ffmpeg faststart repack failed — video may not stream correctly.")
+            print("   ⚠️  ffmpeg H.264/faststart repack failed — video may not stream correctly.")
             print(ret.stderr.decode(errors="replace")[-300:])
     except (FileNotFoundError, OSError):
         print("   ⚠️  ffmpeg not found — video may not stream correctly.")

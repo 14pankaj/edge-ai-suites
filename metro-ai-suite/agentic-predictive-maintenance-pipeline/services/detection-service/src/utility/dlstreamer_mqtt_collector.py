@@ -91,6 +91,7 @@ def _extract_classification(payload: dict, fps: float = _DEFAULT_FPS) -> dict | 
 
     return {
         "frame_id": int(frame_id),
+        "video_time_seconds": float(timestamp_ns) / 1_000_000_000,
         "label": label or "unknown",
         "confidence": float(confidence) if confidence is not None else 0.0,
         "probabilities": list(probabilities) if probabilities else None,

@@ -1,0 +1,44 @@
+<!-- Copyright (C) 2026 Intel Corporation -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!--
+  Agent Run card body — shared markup rendered server-side for the initial
+  page load (selected_run_id/selected_phase/selected_result, from the index()
+  route) and re-rendered client-side (identical structure/classes) by
+  run-select.js whenever a different row is picked in "Recent Agent Runs".
+-->
+{% if not selected_run_id %}
+<p class="empty">No runs yet — click "Run Inspection" to start one.</p>
+{% elif not selected_result %}
+<p class="empty">Run <code>{{ selected_run_id }}</code> details are temporarily unavailable.</p>
+{% else %}
+  {% set status = "running" if selected_result.get("status") == "running"
+       else "error" if selected_result.get("error")
+       else "completed" %}
+  <p class="run-id-line">
+    <span class="status-badge status-{{ status }}">{{ status }}{{ ' — ' ~ selected_phase if status == 'running' and selected_phase else '' }}</span>
+    <code class="run-id-cell">{{ selected_run_id }}</code>
+  </p>
+  <ul class="agent-checklist">
+    <li class="{{ 'agent-step-done' if selected_result.get('policy') else '' }}">
+      <span class="agent-step-name">Policy</span>
+      <span class="agent-step-desc">{{ 'Policy checks completed' if selected_result.get('policy') else 'Running policy checks…' }}</span>
+      <span class="agent-step-status">{{ '✓ DONE' if selected_result.get('policy') else 'pending' }}</span>
+    </li>
+    <li class="{{ 'agent-step-done' if selected_result.get('analysis') else '' }}">
+      <span class="agent-step-name">Analysis</span>
+      <span class="agent-step-desc">{{ 'Detection results analyzed' if selected_result.get('analysis') else 'Analyzing detection results…' }}</span>
+      <span class="agent-step-status">{{ '✓ DONE' if selected_result.get('analysis') else 'pending' }}</span>
+    </li>
+    <li class="{{ 'agent-step-done' if selected_result.get('evidence') else '' }}">
+      <span class="agent-step-name">Evidence Audit Trail</span>
+      <span class="agent-step-desc">{{ 'Evidence records generated' if selected_result.get('evidence') else 'Generating evidence records…' }}</span>
+      <span class="agent-step-status">{{ '✓ DONE' if selected_result.get('evidence') else 'pending' }}</span>
+    </li>
+    <li class="{{ 'agent-step-done' if selected_result.get('ticket') else 'agent-step-optional' }}">
+      <span class="agent-step-name">Maintenance Ticket</span>
+      <span class="agent-step-desc">{{ 'Ticket created' if selected_result.get('ticket') else 'Created only if required' }}</span>
+      <span class="agent-step-status">{{ '✓ DONE' if selected_result.get('ticket') else 'OPTIONAL' }}</span>
+    </li>
+  </ul>
+  <p class="status-note"><a href="/results/{{ selected_run_id }}">View full run results &rarr;</a></p>
+{% endif %}
