@@ -1419,6 +1419,33 @@ async def overlay_detections():
     return [{k: d.get(k) for k in _OVERLAY_FIELDS} for d in detections]
 
 
+@app.get("/api/recent-frames")
+async def recent_frames(limit: int = 6):
+    """Most recently stored detections, newest first.
+
+    Feeds the dashboard's "Recent Defect Frames" gallery: recent-frames.js
+    seeks the already-loaded Camera Preview video to each detection's
+    ``video_time_seconds`` and draws the frame + bbox onto a thumbnail
+    canvas client-side — there's no per-frame image stored server-side, so
+    this only returns the real bbox/label/confidence fields, ordered by
+    insertion recency (``id`` desc) via storage-service's structured query
+    endpoint (``GET /detections`` only supports confidence-desc ordering).
+    """
+    limit = max(1, min(limit, 50))
+    plan = {
+        "operation": "list",
+        "fields": list(_OVERLAY_FIELDS),
+        "sort": [{"field": "id", "direction": "desc"}],
+        "limit": limit,
+    }
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            result = await _run_detection_query(client, plan)
+        except HTTPException:
+            return []
+    return result.get("data", [])
+
+
 @app.get("/detections", response_class=HTMLResponse)
 async def detections_page(
     request: Request,

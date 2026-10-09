@@ -529,7 +529,9 @@ footer {
 
 /* Recent Defect Frames — horizontally scrollable thumbnail strip: roughly
    3-4 thumbnails visible at rest, 2-3 visible once scrolled (per approved
-   wireframe), via scroll-snap on fixed-width thumbs. */
+   wireframe), via scroll-snap on fixed-width thumbs. Each thumbnail is the
+   real video frame (grabbed client-side at the detection's video_time_seconds
+   by recent-frames.js) with its bounding box overlaid, not a static image. */
 .frame-strip {
   display: flex;
   gap: 0.6rem;
@@ -540,17 +542,32 @@ footer {
 .frame-thumb {
   flex: 0 0 auto;
   width: 150px;
-  height: 90px;
   scroll-snap-align: start;
-  background: repeating-linear-gradient(45deg, var(--surface-inset), var(--surface-inset) 10px, var(--surface) 10px, var(--surface) 20px);
-  border: 1px dashed var(--warn);
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--warn);
+  flex-direction: column;
+  overflow: hidden;
   font-size: 0.78rem;
 }
+.frame-thumb canvas { display: block; width: 150px; height: 90px; }
+.frame-thumb-loading {
+  height: 90px;
+  background: repeating-linear-gradient(45deg, var(--surface-inset), var(--surface-inset) 10px, var(--surface) 10px, var(--surface) 20px);
+}
+.frame-thumb-caption {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+.frame-thumb-row { display: flex; align-items: center; justify-content: space-between; gap: 0.3rem; }
+.frame-thumb-row-muted { color: var(--muted); font-size: 0.66rem; }
+.frame-thumb-id { font-weight: 600; color: var(--text); }
+.frame-thumb-confidence, .frame-thumb-time { color: var(--muted); }
 
 /* Run Pipeline action row */
 .run-now-form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-top: 1rem; }

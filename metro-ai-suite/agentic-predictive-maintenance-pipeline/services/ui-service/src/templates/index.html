@@ -164,19 +164,13 @@
         {% endif %}
       </section>
 
-      <section class="card placeholder-card">
+      <section class="card">
         <h2>Recent Defect Frames
-          <span class="placeholder-badge" title="No frame-image backend yet — this is a design placeholder">PLACEHOLDER</span>
           <a href="/detections" class="view-all-link">View all detections</a>
         </h2>
-        <div class="frame-strip" aria-label="Recent defect frame thumbnails (horizontally scrollable)">
-          <div class="frame-thumb"><span>Frame</span></div>
-          <div class="frame-thumb"><span>Frame</span></div>
-          <div class="frame-thumb"><span>Frame</span></div>
-          <div class="frame-thumb"><span>Frame</span></div>
-          <div class="frame-thumb"><span>Frame</span></div>
+        <div class="frame-strip" id="recent-frame-strip" aria-label="Recent defect frame thumbnails (horizontally scrollable)" data-limit="6">
+          <p class="empty" id="recent-frames-empty" hidden>No detections yet. Click "Run Inspection" to start.</p>
         </div>
-        <p class="status-note">Scrolls horizontally — about 3–4 thumbnails visible at rest, 2–3 while scrolling.</p>
       </section>
 
       <section class="card live-grid-card">
@@ -313,5 +307,6 @@
   <script src="/static/js/system-capabilities.js"></script>
   <script src="/static/js/run-select.js"></script>
   <script src="/static/js/camera-preview.js"></script>
+  <script src="/static/js/recent-frames.js"></script>
 </body>
 </html>

@@ -89,8 +89,10 @@
       if (!boxes || !boxes.length) return;
 
       ctx.lineWidth = Math.max(2, canvas.width / 240);
-      ctx.strokeStyle = "#00e676";
-      ctx.fillStyle = "#00e676";
+      // #22c55e matches the ui-ux-builder skill's Stack C "active" status color
+      // (design-tokens.md), reused here for detected bounding boxes.
+      ctx.strokeStyle = "#22c55e";
+      ctx.fillStyle = "#22c55e";
       ctx.font = `${Math.max(14, Math.round(canvas.width / 45))}px sans-serif`;
       ctx.textBaseline = "bottom";
 
