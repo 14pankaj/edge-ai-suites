@@ -550,6 +550,14 @@ footer {
   flex-direction: column;
   overflow: hidden;
   font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.frame-thumb:hover { border-color: var(--accent); }
+.frame-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.frame-thumb.frame-thumb-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .frame-thumb canvas { display: block; width: 150px; height: 90px; }
 .frame-thumb-loading {

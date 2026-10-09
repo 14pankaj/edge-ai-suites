@@ -18,6 +18,7 @@
   function init() {
     const strip = document.getElementById("recent-frame-strip");
     const player = document.getElementById("camera-preview-player");
+    const previewWrap = document.getElementById("camera-preview-wrap");
     const emptyNote = document.getElementById("recent-frames-empty");
     if (!strip || !player) return;
 
@@ -44,9 +45,20 @@
       grabber.preload = "auto";
       grabber.src = videoSrc;
 
-      const thumbs = frames.map(() => {
+      const thumbs = frames.map((frame) => {
         const el = document.createElement("div");
         el.className = "frame-thumb frame-thumb-loading";
+        el.tabIndex = 0;
+        el.setAttribute("role", "button");
+        el.setAttribute("aria-pressed", "false");
+        el.title = "Click to jump the Camera Preview to this frame";
+        el.addEventListener("click", () => selectFrame(frame, el));
+        el.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            selectFrame(frame, el);
+          }
+        });
         strip.appendChild(el);
         return el;
       });
@@ -54,6 +66,35 @@
       grabber.addEventListener("loadedmetadata", () => {
         buildThumbnailsSequentially(grabber, frames, thumbs, 0);
       });
+    }
+
+    // Clicking a thumbnail seeks the (already-visible) Camera Preview player
+    // to that detection's video_time_seconds and pauses on that exact frame
+    // — camera-preview.js's own "seeked" listener redraws the bbox overlay
+    // for us, so no overlay logic is duplicated here. Re-clicking a thumbnail
+    // (same or different) just re-seeks/switches the highlight. There is no
+    // explicit "clear selection" control: the player's own Play control is
+    // always live, so pressing Play simply resumes playback from that point
+    // and the highlighted thumbnail is understood to no longer reflect the
+    // live position — no extra UI is needed for that.
+    function selectFrame(frame, el) {
+      strip.querySelectorAll(".frame-thumb-active").forEach((other) => {
+        other.classList.remove("frame-thumb-active");
+        other.setAttribute("aria-pressed", "false");
+      });
+
+      el.classList.add("frame-thumb-active");
+      el.setAttribute("aria-pressed", "true");
+
+      const time = Number(frame.video_time_seconds);
+      if (Number.isFinite(time)) {
+        player.pause();
+        player.currentTime = time;
+      }
+
+      if (previewWrap) {
+        previewWrap.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
     }
 
     function buildThumbnailsSequentially(grabber, frames, thumbs, index) {
