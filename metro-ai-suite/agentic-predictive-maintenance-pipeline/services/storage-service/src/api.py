@@ -151,6 +151,9 @@ def query_detections(query: DetectionQuery):
 def get_detections(
     label: str | None = Query(None, description="Filter by defect class"),
     min_confidence: float | None = Query(None, ge=0.0, le=1.0),
+    max_confidence: float | None = Query(None, ge=0.0, le=1.0),
+    min_video_time: float | None = Query(None, ge=0.0, description="Only detections at/after this video_time_seconds"),
+    max_video_time: float | None = Query(None, ge=0.0, description="Only detections at/before this video_time_seconds"),
     min_id: int | None = Query(None, ge=0, description="Only detections with id > min_id"),
     max_id: int | None = Query(None, ge=0, description="Only detections with id <= max_id"),
     limit: int | None = Query(None, ge=1),
@@ -158,7 +161,9 @@ def get_detections(
     global db, _request_count
     _request_count += 1
     return db.get_detections(
-        label=label, min_confidence=min_confidence, min_id=min_id, max_id=max_id, limit=limit,
+        label=label, min_confidence=min_confidence, max_confidence=max_confidence,
+        min_video_time=min_video_time, max_video_time=max_video_time,
+        min_id=min_id, max_id=max_id, limit=limit,
     )
 
 

@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Intel Corporation -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -19,9 +21,9 @@
       </div>
     </div>
   </header>
-  <nav>
+  <nav aria-label="Primary navigation">
     <a href="/">Dashboard</a>
-    <a href="/detections" class="active">Detections</a>
+    <a href="/detections" class="active" aria-current="page">Detections</a>
     <a href="/chat">Ask &amp; Analyze</a>
   </nav>
 
@@ -30,7 +32,10 @@
       <h2>Filter Detections</h2>
       <form method="GET" action="/detections" class="filter-form">
         <label>Label: <input type="text" name="label" value="{{ filter_label }}"></label>
-        <label>Min Confidence: <input type="number" name="min_confidence" step="0.01" min="0" max="1" value="{{ filter_confidence }}"></label>
+        <label>Min Confidence: <input type="number" name="min_confidence" step="0.01" min="0" max="1" value="{{ filter_min_confidence }}"></label>
+        <label>Max Confidence: <input type="number" name="max_confidence" step="0.01" min="0" max="1" value="{{ filter_max_confidence }}"></label>
+        <label>Min Video Time (s): <input type="number" name="min_time" step="0.1" min="0" value="{{ filter_min_time }}"></label>
+        <label>Max Video Time (s): <input type="number" name="max_time" step="0.1" min="0" value="{{ filter_max_time }}"></label>
         <label>Limit:
           <select name="limit">
             {% for n in [50, 100, 250, 500] %}

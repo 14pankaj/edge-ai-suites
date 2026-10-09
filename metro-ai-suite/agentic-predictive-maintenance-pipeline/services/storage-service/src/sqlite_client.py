@@ -179,6 +179,9 @@ class SQLiteClient:
 
     def get_detections(self, label: Optional[str] = None,
                        min_confidence: Optional[float] = None,
+                       max_confidence: Optional[float] = None,
+                       min_video_time: Optional[float] = None,
+                       max_video_time: Optional[float] = None,
                        min_id: Optional[int] = None,
                        max_id: Optional[int] = None,
                        limit: Optional[int] = None) -> list[dict]:
@@ -190,6 +193,15 @@ class SQLiteClient:
         if min_confidence is not None:
             conditions.append("confidence >= ?")
             params.append(min_confidence)
+        if max_confidence is not None:
+            conditions.append("confidence <= ?")
+            params.append(max_confidence)
+        if min_video_time is not None:
+            conditions.append("video_time_seconds >= ?")
+            params.append(min_video_time)
+        if max_video_time is not None:
+            conditions.append("video_time_seconds <= ?")
+            params.append(max_video_time)
         if min_id is not None:
             conditions.append("id > ?")
             params.append(min_id)

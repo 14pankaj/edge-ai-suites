@@ -1451,21 +1451,36 @@ async def detections_page(
     request: Request,
     label: Optional[str] = None,
     min_confidence: Optional[str] = None,
+    max_confidence: Optional[str] = None,
+    min_time: Optional[str] = None,
+    max_time: Optional[str] = None,
     limit: int = 100,
 ):
     # Treat empty string from form submission as no filter
-    parsed_confidence: Optional[float] = None
-    if min_confidence:
+    def _parse_float(raw: Optional[str]) -> Optional[float]:
+        if not raw:
+            return None
         try:
-            parsed_confidence = float(min_confidence)
+            return float(raw)
         except ValueError:
-            pass
+            return None
+
+    parsed_min_confidence = _parse_float(min_confidence)
+    parsed_max_confidence = _parse_float(max_confidence)
+    parsed_min_time = _parse_float(min_time)
+    parsed_max_time = _parse_float(max_time)
 
     params: dict = {"limit": limit}
     if label:
         params["label"] = label
-    if parsed_confidence is not None:
-        params["min_confidence"] = parsed_confidence
+    if parsed_min_confidence is not None:
+        params["min_confidence"] = parsed_min_confidence
+    if parsed_max_confidence is not None:
+        params["max_confidence"] = parsed_max_confidence
+    if parsed_min_time is not None:
+        params["min_video_time"] = parsed_min_time
+    if parsed_max_time is not None:
+        params["max_video_time"] = parsed_max_time
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
@@ -1487,7 +1502,10 @@ async def detections_page(
             "use_case_id": _USE_CASE_ID,
             "detections": detections,
             "filter_label": label or "",
-            "filter_confidence": parsed_confidence if parsed_confidence is not None else "",
+            "filter_min_confidence": parsed_min_confidence if parsed_min_confidence is not None else "",
+            "filter_max_confidence": parsed_max_confidence if parsed_max_confidence is not None else "",
+            "filter_min_time": parsed_min_time if parsed_min_time is not None else "",
+            "filter_max_time": parsed_max_time if parsed_max_time is not None else "",
             "filter_limit": limit,
             "total_count": total_count,
             "multimodal_enabled": bool(_MULTIMODAL_CONFIG_PATH),
