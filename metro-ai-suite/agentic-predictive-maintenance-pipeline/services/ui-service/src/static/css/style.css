@@ -527,7 +527,7 @@ footer {
   pointer-events: none;
 }
 
-/* Recent Defect Frames — horizontally scrollable thumbnail strip: roughly
+/* Recent Detection Frames — horizontally scrollable thumbnail strip: roughly
    3-4 thumbnails visible at rest, 2-3 visible once scrolled (per approved
    wireframe), via scroll-snap on fixed-width thumbs. Each thumbnail is the
    real video frame (grabbed client-side at the detection's video_time_seconds

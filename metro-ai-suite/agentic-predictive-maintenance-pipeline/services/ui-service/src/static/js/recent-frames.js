@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
-// Renders the dashboard's "Recent Defect Frames" gallery. There is no
+// Renders the dashboard's "Recent Detection Frames" gallery. There is no
 // per-frame image stored server-side (storage-service only persists bbox +
 // video_time_seconds + label/confidence per detection), so each thumbnail is
 // produced client-side: a hidden <video> (same source as Camera Preview) is
