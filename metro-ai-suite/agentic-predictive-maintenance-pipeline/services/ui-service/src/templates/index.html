@@ -151,7 +151,7 @@
       <section class="card">
         <h2>Camera Preview</h2>
         <div class="camera-preview-box camera-preview-box-video" id="camera-preview-wrap" data-video-fps="{{ video_fps }}">
-          <video id="camera-preview-player" controls muted
+          <video id="camera-preview-player" controls muted preload="metadata"
             {% if videos and videos[0] %}src="/media/videos/{{ videos[0] | urlencode }}"{% endif %}>
             Your browser does not support the video tag.
           </video>

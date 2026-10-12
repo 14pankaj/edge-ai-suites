@@ -42,8 +42,15 @@
       // on the same element.
       const grabber = document.createElement("video");
       grabber.muted = true;
-      grabber.preload = "auto";
-      grabber.src = videoSrc;
+      grabber.preload = "metadata";
+      const startGrabber = () => {
+        grabber.src = videoSrc;
+      };
+      if (player.readyState >= 1 /* HAVE_METADATA */) {
+        startGrabber();
+      } else {
+        player.addEventListener("loadedmetadata", startGrabber, { once: true });
+      }
 
       const thumbs = frames.map((frame) => {
         const el = document.createElement("div");
@@ -67,16 +74,6 @@
         buildThumbnailsSequentially(grabber, frames, thumbs, 0);
       });
     }
-
-    // Clicking a thumbnail seeks the (already-visible) Camera Preview player
-    // to that detection's video_time_seconds and pauses on that exact frame
-    // — camera-preview.js's own "seeked" listener redraws the bbox overlay
-    // for us, so no overlay logic is duplicated here. Re-clicking a thumbnail
-    // (same or different) just re-seeks/switches the highlight. There is no
-    // explicit "clear selection" control: the player's own Play control is
-    // always live, so pressing Play simply resumes playback from that point
-    // and the highlighted thumbnail is understood to no longer reflect the
-    // live position — no extra UI is needed for that.
     function selectFrame(frame, el) {
       strip.querySelectorAll(".frame-thumb-active").forEach((other) => {
         other.classList.remove("frame-thumb-active");
