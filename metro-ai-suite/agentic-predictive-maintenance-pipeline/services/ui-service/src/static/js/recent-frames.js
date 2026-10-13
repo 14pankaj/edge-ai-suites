@@ -8,12 +8,16 @@
 // seeked to the detection's video_time_seconds, the resulting frame is drawn
 // onto a small <canvas> together with its bounding box, and captioned with
 // the real frame_id/label/confidence from /api/recent-frames.
+//
+// Polled every POLL_INTERVAL_MS (same cadence as live-status.js) so new
+// detections show up without a full page reload.
 
 (function () {
   "use strict";
 
   const THUMB_WIDTH = 150;
   const THUMB_HEIGHT = 90;
+  const POLL_INTERVAL_MS = 3000;
 
   function init() {
     const strip = document.getElementById("recent-frame-strip");
@@ -23,14 +27,42 @@
     if (!strip || !player) return;
 
     const limit = parseInt(strip.dataset.limit, 10) || 6;
-    const videoSrc = player.getAttribute("src");
 
-    fetch(`/api/recent-frames?limit=${limit}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((frames) => render(Array.isArray(frames) ? frames : []))
-      .catch(() => render([]));
+    // Bumped on every re-render so an in-flight (async, seek-driven)
+    // thumbnail build from a stale poll can detect it's obsolete and stop
+    // instead of racing a newer build's DOM/grabber state.
+    let generation = 0;
+    // Tracks what's currently rendered so an unchanged poll result is a
+    // no-op — otherwise every 3s poll would flash the gallery back to its
+    // loading state and re-seek the grabber video for no reason.
+    let lastFrameKey = null;
 
-    function render(frames) {
+    function frameKey(frames) {
+      return frames.map((f) => `${f.frame_id}:${f.video_time_seconds}`).join("|");
+    }
+
+    function poll() {
+      const videoSrc = player.getAttribute("src");
+      fetch(`/api/recent-frames?limit=${limit}`)
+        .then((r) => (r.ok ? r.json() : []))
+        .then((frames) => {
+          const list = Array.isArray(frames) ? frames : [];
+          const key = frameKey(list);
+          if (key === lastFrameKey) return;
+          lastFrameKey = key;
+          render(list, videoSrc);
+        })
+        .catch(() => {
+          if (lastFrameKey !== null) return; // keep showing the last good result
+          lastFrameKey = "";
+          render([], videoSrc);
+        });
+    }
+
+    function render(frames, videoSrc) {
+      const myGeneration = ++generation;
+      strip.innerHTML = "";
+
       if (!frames.length || !videoSrc) {
         if (emptyNote) emptyNote.hidden = false;
         return;
@@ -71,7 +103,8 @@
       });
 
       grabber.addEventListener("loadedmetadata", () => {
-        buildThumbnailsSequentially(grabber, frames, thumbs, 0);
+        if (myGeneration !== generation) return; // superseded by a newer poll
+        buildThumbnailsSequentially(grabber, frames, thumbs, 0, myGeneration);
       });
     }
     function selectFrame(frame, el) {
@@ -94,15 +127,16 @@
       }
     }
 
-    function buildThumbnailsSequentially(grabber, frames, thumbs, index) {
-      if (index >= frames.length) return;
+    function buildThumbnailsSequentially(grabber, frames, thumbs, index, myGeneration) {
+      if (myGeneration !== generation || index >= frames.length) return;
       const frame = frames[index];
       const time = Number(frame.video_time_seconds);
 
       const onSeeked = () => {
         grabber.removeEventListener("seeked", onSeeked);
+        if (myGeneration !== generation) return; // superseded by a newer poll
         drawThumbnail(grabber, frame, thumbs[index]);
-        buildThumbnailsSequentially(grabber, frames, thumbs, index + 1);
+        buildThumbnailsSequentially(grabber, frames, thumbs, index + 1, myGeneration);
       };
 
       if (Number.isFinite(time) && grabber.duration && time <= grabber.duration) {
@@ -111,7 +145,7 @@
       } else {
         // No usable timestamp for this detection — leave a caption-only card.
         renderCaptionOnly(frame, thumbs[index]);
-        buildThumbnailsSequentially(grabber, frames, thumbs, index + 1);
+        buildThumbnailsSequentially(grabber, frames, thumbs, index + 1, myGeneration);
       }
     }
 
@@ -167,6 +201,9 @@
         `</div>`;
       return caption;
     }
+
+    poll();
+    setInterval(poll, POLL_INTERVAL_MS);
   }
 
   if (document.readyState === "loading") {
