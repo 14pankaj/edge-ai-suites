@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+import sqlite3
 import uuid
 import pytest
 
@@ -30,11 +31,39 @@ def db():
 
 
 def test_insert_and_query(db):
-    db.insert_detection(1, "Rupture", 0.9, 10, 20, 50, 40)
+    db.insert_detection(1, "Rupture", 0.9, 10, 20, 50, 40, video_time_seconds=1.25)
     results = db.get_detections()
     assert len(results) == 1
     assert results[0]["label"] == "Rupture"
     assert results[0]["confidence"] == pytest.approx(0.9)
+    assert results[0]["video_time_seconds"] == pytest.approx(1.25)
+    assert results[0]["detection_timestamp"]
+
+
+def test_legacy_timestamp_migrates_to_detection_timestamp(tmp_path):
+    path = tmp_path / "legacy.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("""CREATE TABLE detections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            frame_id INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            x REAL NOT NULL,
+            y REAL NOT NULL,
+            width REAL NOT NULL,
+            height REAL NOT NULL,
+            timestamp TEXT DEFAULT (datetime('now'))
+        )""")
+        conn.execute(
+            "INSERT INTO detections (frame_id, label, confidence, x, y, width, height, timestamp) "
+            "VALUES (1, 'Rupture', 0.9, 10, 20, 50, 40, '2026-01-01T00:00:00')"
+        )
+
+    client = SQLiteClient(str(path))
+    row = client.get_detections()[0]
+    assert row["detection_timestamp"] == "2026-01-01T00:00:00"
+    assert row["video_time_seconds"] is None
+    assert "timestamp" not in row
 
 
 def test_insert_many(db):

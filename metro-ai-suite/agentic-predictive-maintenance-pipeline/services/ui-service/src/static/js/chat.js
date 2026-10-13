@@ -18,7 +18,25 @@
   const retryButton = document.getElementById("chat-retry");
   const clearButton = document.getElementById("chat-clear");
   const defaultRunOption = document.getElementById("chat-default-run-option");
+  const promptList = document.getElementById("prompt-list");
   const STORAGE_KEY_PREFIX = "apm.chat.history.v2";
+  const PROMPTS_BY_MODE = {
+    analysis: [
+      { label: "Summarize findings", prompt: "Summarize the most important maintenance findings." },
+      { label: "Top risks", prompt: "What are the top maintenance risks identified in the analysis?" },
+      { label: "Recommended actions", prompt: "What maintenance actions are recommended, and why?" },
+    ],
+    detections: [
+      { label: "Prioritize detections", prompt: "Which detections need immediate attention, and why?" },
+      { label: "Recent detections", prompt: "List the most recent detections and their confidence levels." },
+      { label: "Detections by class", prompt: "Break down the detections by class/category." },
+    ],
+    combined: [
+      { label: "Compare evidence", prompt: "Compare the evidence and recommended maintenance actions." },
+      { label: "Findings vs. detections", prompt: "How do the detection results support the analysis findings?" },
+      { label: "Full picture", prompt: "Give me a complete picture combining analysis and detection evidence." },
+    ],
+  };
   const MAX_STORED_MESSAGES = 100;
   let lastRequest = null;
   let pending = false;
@@ -32,6 +50,24 @@
     defaultRunOption.textContent = selectedMode() === "detections"
       ? "All stored detections"
       : "Latest completed run";
+  }
+
+  function renderPromptSuggestions(mode) {
+    if (!promptList) return;
+    const prompts = PROMPTS_BY_MODE[mode || selectedMode()] || [];
+    while (promptList.firstChild) promptList.removeChild(promptList.firstChild);
+    prompts.forEach(({ label, prompt }) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "prompt-chip";
+      button.dataset.prompt = prompt;
+      button.textContent = label;
+      button.addEventListener("click", () => {
+        messageInput.value = button.dataset.prompt;
+        messageInput.focus();
+      });
+      promptList.appendChild(button);
+    });
   }
 
   function historyStorageKey() {
@@ -63,6 +99,76 @@
     return message;
   }
 
+  // Highlights standalone numbers within a line of text using safe DOM nodes (no raw-HTML injection).
+  function appendHighlightedText(parent, line) {
+    const numberPattern = /\b\d[\d,]*(?:\.\d+)?%?\b/g;
+    let lastIndex = 0;
+    let match;
+    while ((match = numberPattern.exec(line))) {
+      if (match.index > lastIndex) parent.appendChild(document.createTextNode(line.slice(lastIndex, match.index)));
+      const strong = document.createElement("strong");
+      strong.className = "chat-highlight";
+      strong.textContent = match[0];
+      parent.appendChild(strong);
+      lastIndex = numberPattern.lastIndex;
+    }
+    if (lastIndex < line.length) parent.appendChild(document.createTextNode(line.slice(lastIndex)));
+  }
+
+  function splitTableRow(line) {
+    return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+  }
+
+  function isTableSeparatorRow(line) {
+    const cells = splitTableRow(line);
+    return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
+  }
+
+  // Renders the assistant answer as paragraphs with highlighted numbers, and
+  // Markdown-style "| a | b |" tables as real <table> elements. Falls back to
+  // plain paragraphs when no table syntax is present.
+  function renderAnswerContent(container, text) {
+    const lines = text.split("\n");
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (line.trim().startsWith("|") && i + 1 < lines.length && isTableSeparatorRow(lines[i + 1])) {
+        const table = document.createElement("table");
+        table.className = "md-table";
+        const thead = document.createElement("thead");
+        const headRow = document.createElement("tr");
+        splitTableRow(line).forEach((cell) => {
+          const th = document.createElement("th");
+          th.textContent = cell;
+          headRow.appendChild(th);
+        });
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+        const tbody = document.createElement("tbody");
+        i += 2;
+        while (i < lines.length && lines[i].trim().startsWith("|")) {
+          const tr = document.createElement("tr");
+          splitTableRow(lines[i]).forEach((cell) => {
+            const td = document.createElement("td");
+            appendHighlightedText(td, cell);
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+          i += 1;
+        }
+        table.appendChild(tbody);
+        container.appendChild(table);
+        continue;
+      }
+      if (line.trim() !== "") {
+        const p = document.createElement("p");
+        appendHighlightedText(p, line);
+        container.appendChild(p);
+      }
+      i += 1;
+    }
+  }
+
   function appendMessage(kind, text, options = {}, save = true) {
     emptyState.hidden = true;
     const article = document.createElement("article");
@@ -74,9 +180,13 @@
     if (options.mode) heading.textContent += ` · ${options.mode}`;
     article.appendChild(heading);
 
-    const content = document.createElement("p");
+    const content = document.createElement("div");
     content.className = "chat-message-content";
-    content.textContent = text;
+    if (kind === "assistant") {
+      renderAnswerContent(content, text);
+    } else {
+      content.textContent = text;
+    }
     article.appendChild(content);
 
     if (options.query) {
@@ -263,13 +373,6 @@
     }
   });
 
-  document.querySelectorAll(".prompt-chip").forEach((button) => {
-    button.addEventListener("click", () => {
-      messageInput.value = button.dataset.prompt;
-      messageInput.focus();
-    });
-  });
-
   retryButton.addEventListener("click", () => {
     if (lastRequest) sendRequest(lastRequest, false);
   });
@@ -277,8 +380,12 @@
   runIdInput.addEventListener("change", showSelectedRunHistory);
 
   document.querySelectorAll('input[name="chat-mode"]').forEach((input) => {
-    input.addEventListener("change", updateRunScopeLabel);
+    input.addEventListener("change", () => {
+      updateRunScopeLabel();
+      renderPromptSuggestions();
+    });
   });
   restoreHistory();
   updateRunScopeLabel();
+  renderPromptSuggestions();
 })();

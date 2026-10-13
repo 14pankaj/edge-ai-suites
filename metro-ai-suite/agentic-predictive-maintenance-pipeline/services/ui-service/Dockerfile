@@ -52,7 +52,7 @@ RUN if [ "$COPYLEFT_SOURCES" = "true" ]; then \
         rm -rf /var/lib/apt/lists/*; \
     fi
 
-RUN chown -R appuser:appuser /app
+RUN mkdir -p /app/videos && chown -R appuser:appuser /app
 
 USER appuser
 

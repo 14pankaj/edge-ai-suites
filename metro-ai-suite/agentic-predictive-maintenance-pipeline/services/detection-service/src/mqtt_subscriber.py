@@ -44,6 +44,7 @@ def _on_message(client, userdata, msg):
             meta = payload["metadata"]
             timestamp_ns = meta.get("timestamp", 0)
             frame_id = timestamp_ns // 33_333_333  # ~frame number at 30fps
+            video_time_seconds = float(timestamp_ns) / 1_000_000_000
             objects = meta.get("objects", [])
             detections = []
             for obj in objects:
@@ -52,6 +53,7 @@ def _on_message(client, userdata, msg):
                 confidence = float(det.get("confidence", 0.0))
                 detections.append({
                     "frame_id":   frame_id,
+                    "video_time_seconds": video_time_seconds,
                     "label":      label,
                     "confidence": confidence,
                     "x":          int(obj.get("x", 0)),
@@ -68,6 +70,7 @@ def _on_message(client, userdata, msg):
         for det in detections:
             storage_client.post_detection({
                 "frame_id":   det.get("frame_id", 0),
+                "video_time_seconds": det.get("video_time_seconds"),
                 "label":      det.get("label", "unknown"),
                 "confidence": float(det.get("confidence", 0.0)),
                 "x":          int(det.get("x", 0)),

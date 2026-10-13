@@ -99,6 +99,7 @@ validate_env() {
     local _pre_dl_device="${DL_DEVICE:-}"
 
     # Source the env file
+    unset MULTIMODAL_CONFIG_PATH
     set -a
     source "${env_file}"
     set +a

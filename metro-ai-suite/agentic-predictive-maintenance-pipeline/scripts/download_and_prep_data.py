@@ -50,6 +50,11 @@ Usage
 
   # Custom split ratio
   python scripts/download_and_prep_data.py "<url>" --train-ratio 0.8
+
+  # Transcode a manually-dropped-in video (see videos/README.md) to
+  # browser-playable H.264/faststart in place, without downloading anything
+  python scripts/download_and_prep_data.py --transcode-video \\
+      apps/pipeline-defect-detection/resources/videos/datastream.mp4
 """
 
 import argparse
@@ -258,8 +263,91 @@ def prep_gas_detection(download_dir: Path, output_dir: Path,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Video creation
+# Video creation / transcoding
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Codecs the ui-service's <video> tag (and most browsers) can decode natively.
+# Anything else gets re-encoded to H.264 below — this is the single place
+# that transcoding happens; the ui-service just serves files from VIDEOS_DIR
+# as-is and relies on this script having already made them browser-playable.
+_BROWSER_SAFE_CODECS = {"h264", "hevc", "vp8", "vp9", "av1"}
+
+
+def probe_video_codec(video_path: Path):
+    """Return *video_path*'s first video stream's codec name, or None if unknown."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(video_path)],
+            capture_output=True, check=False, shell=False, timeout=10,
+        )
+        name = result.stdout.decode(errors="replace").strip()
+        return name or None
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def repack_to_h264(video_path: Path, crf: str = "15", preset: str = "slow") -> bool:
+    """Re-encode *video_path* to H.264 + faststart, in place.
+
+    Used for both cv2-written videos (always MPEG-4 Part 2, needs this to be
+    playable in a browser at all) and manually dropped-in videos. Uses a
+    near-lossless CRF by default so DL Streamer inference results aren't
+    perceptibly shifted near detection-confidence threshold cutoffs — pass a
+    faster/lossier preset only if this file is never used for inference.
+    """
+    tmp_path = video_path.with_suffix(".faststart.mp4")
+    try:
+        ret = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(video_path),
+             "-c:v", "libx264", "-preset", preset, "-crf", crf,
+             "-pix_fmt", "yuv420p", "-an",
+             "-movflags", "+faststart", str(tmp_path)],
+            capture_output=True,
+            check=False,
+            shell=False,
+        )
+        if ret.returncode == 0:
+            tmp_path.replace(video_path)
+            return True
+        tmp_path.unlink(missing_ok=True)
+        print("   ⚠️  ffmpeg H.264/faststart repack failed — video may not stream correctly.")
+        print(ret.stderr.decode(errors="replace")[-300:])
+        return False
+    except (FileNotFoundError, OSError):
+        print("   ⚠️  ffmpeg not found — video may not stream correctly.")
+        print("      Install ffmpeg to optimize video streaming.")
+        return False
+
+
+def transcode_existing_video(video_path: Path) -> bool:
+    """Transcode an existing/manually-dropped-in video to H.264 in place, if needed.
+
+    Used for the ``--transcode-video`` CLI mode so a video someone places
+    directly at e.g. ``apps/<app>/resources/videos/datastream.mp4`` (per that
+    directory's README) gets the same one-time H.264/faststart repack that
+    ``create_video_from_images`` applies to script-generated videos, without
+    needing the ui-service to transcode it on demand.
+    """
+    if not video_path.is_file():
+        print(f"❌ {video_path} does not exist.")
+        return False
+
+    codec = probe_video_codec(video_path)
+    if codec in _BROWSER_SAFE_CODECS:
+        print(f"✅ {video_path} is already browser-playable (codec={codec}) — nothing to do.")
+        return True
+
+    if shutil.which("ffmpeg") is None:
+        print("❌ ffmpeg not found — install ffmpeg to transcode this video.")
+        return False
+
+    print(f"🎬 Transcoding {video_path} (codec={codec}) to H.264/faststart...")
+    if repack_to_h264(video_path):
+        print(f"   ✅ {video_path} is now browser-playable.")
+        return True
+    return False
+
 
 def list_images_sorted(images_dir: Path) -> list:
     """Return all .jpg (falling back to .png) images in *images_dir*, sorted by name.
@@ -340,27 +428,17 @@ def create_video_from_images(images_dir: Path, video_path: Path, fps: int = 30,
         print(f"   ❌ Video was not written to {video_path}.")
         return False
 
-    # cv2 mp4v writer places the moov atom at the end of the file.
-    # GStreamer qtdemux only scans the first 10 MB, so it fails to find moov.
-    # Repack with ffmpeg -movflags +faststart to move moov to the front.
-    tmp_path = video_path.with_suffix(".faststart.mp4")
-    try:
-        ret = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(video_path), "-c", "copy",
-             "-movflags", "+faststart", str(tmp_path)],
-            capture_output=True,
-            check=False,
-            shell=False,
-        )
-        if ret.returncode == 0:
-            tmp_path.replace(video_path)
-        else:
-            tmp_path.unlink(missing_ok=True)
-            print("   ⚠️  ffmpeg faststart repack failed — video may not stream correctly.")
-            print(ret.stderr.decode(errors="replace")[-300:])
-    except (FileNotFoundError, OSError):
-        print("   ⚠️  ffmpeg not found — video may not stream correctly.")
-        print("      Install ffmpeg to optimize video streaming.")
+    # cv2's mp4v writer uses MPEG-4 Part 2 (not H.264) and places the moov
+    # atom at the end of the file. Browsers' <video> tag can't decode
+    # MPEG-4 Part 2 at all (only used for the GStreamer/DL Streamer
+    # pipeline), and GStreamer qtdemux only scans the first 10 MB, so it
+    # fails to find a trailing moov. repack_to_h264 fixes both: re-encode
+    # to H.264 (universally playable, still fine for DL Streamer) with
+    # +faststart (moov moved to the front for streaming). This same file is
+    # used both for DL Streamer inference and for the browser Camera Preview
+    # (so overlay timing always matches what was actually detected), hence
+    # the near-lossless default CRF.
+    repack_to_h264(video_path)
 
     print(f"   ✅ {video_path}  ({written} frames @ {fps} fps, {written/fps:.1f}s)")
 
@@ -380,7 +458,19 @@ def main():
     )
     parser.add_argument(
         "dataset_url",
-        help="URL of the dataset zip to download",
+        nargs="?",
+        default=None,
+        help="URL of the dataset zip to download (not required with --transcode-video)",
+    )
+    parser.add_argument(
+        "--transcode-video",
+        metavar="VIDEO_PATH",
+        help=(
+            "Skip the download/prep flow and just transcode an existing/"
+            "manually-dropped-in video (e.g. a datastream.mp4 placed by hand "
+            "per videos/README.md) to H.264/faststart in place, then exit. "
+            "No-op if it's already browser-playable."
+        ),
     )
     parser.add_argument(
         "--use-case",
@@ -407,6 +497,12 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.transcode_video:
+        sys.exit(0 if transcode_existing_video(Path(args.transcode_video)) else 1)
+
+    if not args.dataset_url:
+        parser.error("dataset_url is required unless --transcode-video is given")
 
     use_case_id = _USE_CASE_MAP[args.use_case]
     output_dir  = Path("datasets") / use_case_id

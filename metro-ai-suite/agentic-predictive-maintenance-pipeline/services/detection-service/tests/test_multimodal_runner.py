@@ -180,7 +180,7 @@ def test_persist_results_posts_each_sample_with_no_bounding_box():
     results = [
         {"source": "img_Smoke.jpg", "label": "Smoke", "confidence": 0.9,
          "image_confidence": 0.85, "sensor_confidence": 0.95,
-         "sensor_raw_json": "{}"},
+         "sensor_raw_json": "{}", "video_time_seconds": 3.25},
         {"source": "img_NoGas.jpg", "label": "NoGas", "confidence": 0.8,
          "image_confidence": 0.75, "sensor_confidence": 0.7,
          "sensor_raw_json": "{}"},
@@ -193,6 +193,7 @@ def test_persist_results_posts_each_sample_with_no_bounding_box():
     assert posted[0]["frame_id"] == 0
     assert posted[0]["label"] == "Smoke"
     assert posted[0]["x"] == 0.0 and posted[0]["width"] == 0.0
+    assert posted[0]["video_time_seconds"] == 3.25
     assert posted[0]["source"] == "gas_detection_multimodal"
     assert posted[1]["frame_id"] == 1
 

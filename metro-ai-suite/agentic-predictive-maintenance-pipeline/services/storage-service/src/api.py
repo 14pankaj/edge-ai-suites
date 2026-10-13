@@ -81,6 +81,9 @@ class Detection(BaseModel):
     y: float = Field(..., description="Bounding box center Y")
     width: float = Field(..., description="Bounding box width")
     height: float = Field(..., description="Bounding box height")
+    video_time_seconds: Optional[float] = Field(
+        None, ge=0.0, description="Source video timestamp in seconds"
+    )
     # Additive multimodal fields — optional/NULL for plain video defect
     # detections. Populated for fused image+sensor classification results
     # (e.g. the gas-detection use case), which have no bounding box.
@@ -122,6 +125,7 @@ def insert_detection(detection: Detection, _auth: None = Depends(require_api_key
         image_confidence=detection.image_confidence,
         sensor_confidence=detection.sensor_confidence,
         sensor_raw_json=detection.sensor_raw_json,
+        video_time_seconds=detection.video_time_seconds,
     )
     return {"inserted": 1}
 
@@ -147,6 +151,9 @@ def query_detections(query: DetectionQuery):
 def get_detections(
     label: str | None = Query(None, description="Filter by defect class"),
     min_confidence: float | None = Query(None, ge=0.0, le=1.0),
+    max_confidence: float | None = Query(None, ge=0.0, le=1.0),
+    min_video_time: float | None = Query(None, ge=0.0, description="Only detections at/after this video_time_seconds"),
+    max_video_time: float | None = Query(None, ge=0.0, description="Only detections at/before this video_time_seconds"),
     min_id: int | None = Query(None, ge=0, description="Only detections with id > min_id"),
     max_id: int | None = Query(None, ge=0, description="Only detections with id <= max_id"),
     limit: int | None = Query(None, ge=1),
@@ -154,7 +161,9 @@ def get_detections(
     global db, _request_count
     _request_count += 1
     return db.get_detections(
-        label=label, min_confidence=min_confidence, min_id=min_id, max_id=max_id, limit=limit,
+        label=label, min_confidence=min_confidence, max_confidence=max_confidence,
+        min_video_time=min_video_time, max_video_time=max_video_time,
+        min_id=min_id, max_id=max_id, limit=limit,
     )
 
 
