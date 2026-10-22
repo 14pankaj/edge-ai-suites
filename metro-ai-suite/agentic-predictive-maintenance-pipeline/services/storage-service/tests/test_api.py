@@ -105,6 +105,41 @@ def test_filter_limit(client):
     assert len(r.json()) == 1
 
 
+def test_offset_pages_are_disjoint_and_complete(client):
+    batch = {"detections": [
+        {"frame_id": i, "label": "Rupture", "confidence": 0.5, "x": 1, "y": 1, "width": 2, "height": 2}
+        for i in range(5)
+    ]}
+    client.post("/detections/batch", json=batch)
+    ids = []
+    for offset in (0, 2, 4):
+        page = client.get(f"/detections?limit=2&offset={offset}").json()
+        ids.extend(d["id"] for d in page)
+    assert len(ids) == 5
+    assert len(set(ids)) == 5
+
+
+def test_count_matches_filtered_list(client):
+    batch = {"detections": [
+        {"frame_id": 1, "label": "Rupture", "confidence": 0.9, "x": 1, "y": 1, "width": 2, "height": 2, "video_time_seconds": 1.0},
+        {"frame_id": 2, "label": "Rupture", "confidence": 0.4, "x": 1, "y": 1, "width": 2, "height": 2, "video_time_seconds": 5.0},
+        {"frame_id": 3, "label": "Obstacle", "confidence": 0.8, "x": 1, "y": 1, "width": 2, "height": 2, "video_time_seconds": 6.0},
+    ]}
+    client.post("/detections/batch", json=batch)
+
+    def total(qs):
+        return client.get(f"/detections/count?{qs}").json()["count"]
+
+    assert total("") == 3
+    assert total("label=Rupture") == 2
+    assert total("min_confidence=0.5") == 2
+    assert total("max_confidence=0.5") == 1
+    assert total("min_video_time=2&max_video_time=5.5") == 1
+    assert total("label=Rupture&min_confidence=0.5") == len(
+        client.get("/detections?label=Rupture&min_confidence=0.5").json()
+    )
+
+
 # ── Structured query ──────────────────────────────────────────────────────────
 
 def test_query_list_contract(client):

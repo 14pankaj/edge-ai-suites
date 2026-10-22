@@ -8,7 +8,8 @@ Endpoints:
   POST   /detections          Insert one detection
   POST   /detections/batch    Bulk insert detections
   POST   /detections/query    Run a validated structured detection query
-  GET    /detections          Query detections (filter by label, confidence, id window)
+  GET    /detections          Query detections (filters, limit/offset paging)
+  GET    /detections/count    Count detections matching the same filters
   GET    /detections/summary  Per-class statistics (optionally scoped to an id window)
   GET    /detections/max_id   Current max detection id + total count (watermark)
   DELETE /detections          Clear all detections
@@ -147,8 +148,7 @@ def query_detections(query: DetectionQuery):
     return db.query_detections(query)
 
 
-@app.get("/detections")
-def get_detections(
+def _detection_filters(
     label: str | None = Query(None, description="Filter by defect class"),
     min_confidence: float | None = Query(None, ge=0.0, le=1.0),
     max_confidence: float | None = Query(None, ge=0.0, le=1.0),
@@ -156,15 +156,29 @@ def get_detections(
     max_video_time: float | None = Query(None, ge=0.0, description="Only detections at/before this video_time_seconds"),
     min_id: int | None = Query(None, ge=0, description="Only detections with id > min_id"),
     max_id: int | None = Query(None, ge=0, description="Only detections with id <= max_id"),
+) -> dict:
+    return {
+        "label": label, "min_confidence": min_confidence, "max_confidence": max_confidence,
+        "min_video_time": min_video_time, "max_video_time": max_video_time,
+        "min_id": min_id, "max_id": max_id,
+    }
+
+
+@app.get("/detections")
+def get_detections(
+    filters: dict = Depends(_detection_filters),
     limit: int | None = Query(None, ge=1),
+    offset: int | None = Query(None, ge=0, description="Rows to skip (requires limit)"),
 ):
     global db, _request_count
     _request_count += 1
-    return db.get_detections(
-        label=label, min_confidence=min_confidence, max_confidence=max_confidence,
-        min_video_time=min_video_time, max_video_time=max_video_time,
-        min_id=min_id, max_id=max_id, limit=limit,
-    )
+    return db.get_detections(**filters, limit=limit, offset=offset)
+
+
+@app.get("/detections/count")
+def count_detections(filters: dict = Depends(_detection_filters)):
+    """Number of detections matching the same filters as GET /detections."""
+    return {"count": db.count_detections(**filters)}
 
 
 @app.get("/detections/summary")

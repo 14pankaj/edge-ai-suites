@@ -27,6 +27,7 @@ import os
 import re
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal, Optional, Union
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import FastAPI, Request, Form, HTTPException
@@ -1507,6 +1508,39 @@ async def recent_frames(limit: int = 6):
     return result.get("data", [])
 
 
+def _page_items(page: int, total_pages: int) -> list:
+    """Page numbers to render; None marks a collapsed run (ellipsis)."""
+    if total_pages <= 1:
+        return []
+    wanted = {1, total_pages, *range(page - 2, page + 3)}
+    items: list = []
+    prev = 0
+    for n in sorted(x for x in wanted if 1 <= x <= total_pages):
+        if n - prev > 1:
+            items.append(None)
+        items.append(n)
+        prev = n
+    return items
+
+
+# Detections-page form field -> storage query parameter.
+_DETECTION_FILTER_PARAMS = {
+    "label": "label",
+    "min_confidence": "min_confidence",
+    "max_confidence": "max_confidence",
+    "min_time": "min_video_time",
+    "max_time": "max_video_time",
+}
+
+
+def _parse_float(raw: Optional[str]) -> Optional[float]:
+    # Empty or malformed form values mean "no filter".
+    try:
+        return float(raw) if raw else None
+    except ValueError:
+        return None
+
+
 @app.get("/detections", response_class=HTMLResponse)
 async def detections_page(
     request: Request,
@@ -1516,59 +1550,61 @@ async def detections_page(
     min_time: Optional[str] = None,
     max_time: Optional[str] = None,
     limit: int = 100,
+    page: int = 1,
 ):
-    # Treat empty string from form submission as no filter
-    def _parse_float(raw: Optional[str]) -> Optional[float]:
-        if not raw:
-            return None
-        try:
-            return float(raw)
-        except ValueError:
-            return None
+    limit = max(1, min(limit, 500))
+    page = max(1, page)
 
-    parsed_min_confidence = _parse_float(min_confidence)
-    parsed_max_confidence = _parse_float(max_confidence)
-    parsed_min_time = _parse_float(min_time)
-    parsed_max_time = _parse_float(max_time)
-
-    params: dict = {"limit": limit}
-    if label:
-        params["label"] = label
-    if parsed_min_confidence is not None:
-        params["min_confidence"] = parsed_min_confidence
-    if parsed_max_confidence is not None:
-        params["max_confidence"] = parsed_max_confidence
-    if parsed_min_time is not None:
-        params["min_video_time"] = parsed_min_time
-    if parsed_max_time is not None:
-        params["max_video_time"] = parsed_max_time
+    form = {
+        "label": label or None,
+        "min_confidence": _parse_float(min_confidence),
+        "max_confidence": _parse_float(max_confidence),
+        "min_time": _parse_float(min_time),
+        "max_time": _parse_float(max_time),
+    }
+    active = {k: v for k, v in form.items() if v is not None}
+    filter_params = {_DETECTION_FILTER_PARAMS[k]: v for k, v in active.items()}
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        # The filtered total comes first so an out-of-range page can be clamped.
         try:
-            r = await client.get(f"{_STORAGE_URL}/detections", params=params)
+            count_r = await client.get(f"{_STORAGE_URL}/detections/count", params=filter_params)
+            total_count = count_r.json().get("count") if count_r.status_code == 200 else None
+        except Exception:
+            total_count = None
+
+        total_pages = max(1, math.ceil(total_count / limit)) if total_count else 1
+        page = min(page, total_pages)
+
+        try:
+            r = await client.get(
+                f"{_STORAGE_URL}/detections",
+                params={**filter_params, "limit": limit, "offset": (page - 1) * limit},
+            )
             detections = r.json() if r.status_code == 200 else []
         except Exception:
             detections = []
 
-        try:
-            summary_r = await client.get(f"{_STORAGE_URL}/detections/summary")
-            summary = summary_r.json() if summary_r.status_code == 200 else {}
-            total_count = sum(c.get("count", 0) for c in summary.get("by_class", []))
-        except Exception:
-            total_count = None
+    first_row = (page - 1) * limit + 1 if detections else 0
 
     return templates.TemplateResponse(
         request=request, name="detections.html",
         context={
             "use_case_id": _USE_CASE_ID,
             "detections": detections,
-            "filter_label": label or "",
-            "filter_min_confidence": parsed_min_confidence if parsed_min_confidence is not None else "",
-            "filter_max_confidence": parsed_max_confidence if parsed_max_confidence is not None else "",
-            "filter_min_time": parsed_min_time if parsed_min_time is not None else "",
-            "filter_max_time": parsed_max_time if parsed_max_time is not None else "",
+            "filter_label": form["label"] or "",
+            "filter_min_confidence": form["min_confidence"] if form["min_confidence"] is not None else "",
+            "filter_max_confidence": form["max_confidence"] if form["max_confidence"] is not None else "",
+            "filter_min_time": form["min_time"] if form["min_time"] is not None else "",
+            "filter_max_time": form["max_time"] if form["max_time"] is not None else "",
             "filter_limit": limit,
             "total_count": total_count,
+            "page": page,
+            "total_pages": total_pages,
+            "page_items": _page_items(page, total_pages),
+            "first_row": first_row,
+            "last_row": first_row + len(detections) - 1 if detections else 0,
+            "base_query": urlencode({**active, "limit": limit}),
             "multimodal_enabled": bool(_MULTIMODAL_CONFIG_PATH),
         },
     )

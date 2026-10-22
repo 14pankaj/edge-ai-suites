@@ -177,14 +177,14 @@ class SQLiteClient:
             conn.executemany(sql, normalized)
             return len(records)
 
-    def get_detections(self, label: Optional[str] = None,
-                       min_confidence: Optional[float] = None,
-                       max_confidence: Optional[float] = None,
-                       min_video_time: Optional[float] = None,
-                       max_video_time: Optional[float] = None,
-                       min_id: Optional[int] = None,
-                       max_id: Optional[int] = None,
-                       limit: Optional[int] = None) -> list[dict]:
+    @staticmethod
+    def _build_where(label: Optional[str] = None,
+                     min_confidence: Optional[float] = None,
+                     max_confidence: Optional[float] = None,
+                     min_video_time: Optional[float] = None,
+                     max_video_time: Optional[float] = None,
+                     min_id: Optional[int] = None,
+                     max_id: Optional[int] = None) -> tuple[str, list]:
         conditions = []
         params: list = []
         if label:
@@ -210,8 +210,26 @@ class SQLiteClient:
             params.append(max_id)
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        return where, params
+
+    def get_detections(self, label: Optional[str] = None,
+                       min_confidence: Optional[float] = None,
+                       max_confidence: Optional[float] = None,
+                       min_video_time: Optional[float] = None,
+                       max_video_time: Optional[float] = None,
+                       min_id: Optional[int] = None,
+                       max_id: Optional[int] = None,
+                       limit: Optional[int] = None,
+                       offset: Optional[int] = None) -> list[dict]:
+        where, params = self._build_where(
+            label, min_confidence, max_confidence, min_video_time,
+            max_video_time, min_id, max_id,
+        )
         limit_clause = f"LIMIT {int(limit)}" if limit else ""
-        sql = f"SELECT * FROM detections {where} ORDER BY confidence DESC {limit_clause}"
+        if limit and offset:
+            limit_clause += f" OFFSET {int(offset)}"
+        sql = (f"SELECT * FROM detections {where} "
+               f"ORDER BY confidence DESC, id ASC {limit_clause}")
 
         with self._get_conn() as conn:
             rows = conn.execute(sql, params).fetchall()
@@ -346,6 +364,12 @@ class SQLiteClient:
         rank = min(n, max(1, math.ceil(p / 100 * n)))
         return sorted_values[rank - 1]
 
+    def count_detections(self, **filters) -> int:
+        """Number of rows matching the same filters accepted by get_detections()."""
+        where, params = self._build_where(**filters)
+        with self._get_conn() as conn:
+            return conn.execute(f"SELECT COUNT(*) FROM detections {where}", params).fetchone()[0]
+
     def get_summary(self, min_id: Optional[int] = None,
                     max_id: Optional[int] = None) -> dict:
         """Return per-class detection counts and confidence stats.
@@ -355,15 +379,7 @@ class SQLiteClient:
         analysis run, instead of always aggregating the entire (potentially
         unbounded, ever-growing) detection history.
         """
-        conditions = []
-        params: list = []
-        if min_id is not None:
-            conditions.append("id > ?")
-            params.append(min_id)
-        if max_id is not None:
-            conditions.append("id <= ?")
-            params.append(max_id)
-        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        where, params = self._build_where(min_id=min_id, max_id=max_id)
 
         sql = f"""
         SELECT label,

@@ -995,3 +995,10 @@ nav a:focus-visible {
   .results-accent-grid { grid-template-columns: 1fr; }
   .results-title-row { flex-direction: column; }
 }
+
+/* Detections pagination */
+.pagination { display: flex; gap: 0.4rem; align-items: center; justify-content: center; flex-wrap: wrap; margin-top: 1rem; }
+.pagination a, .pagination .page-current { min-width: 2rem; padding: 0.35rem 0.7rem; border-radius: var(--radius); border: 1px solid var(--border-strong); font-size: 0.88rem; text-align: center; text-decoration: none; color: var(--text); background: var(--surface-inset); }
+.pagination a:hover { opacity: 0.88; }
+.pagination .page-current { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.pagination .page-gap { color: var(--muted); }

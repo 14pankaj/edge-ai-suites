@@ -205,3 +205,35 @@ def test_health(client):
     assert r.status_code == 200
     assert r.json()["service"] == "ui-service"
     assert r.json()["use_case_id"] == "test-case"
+
+
+@respx.mock
+def test_detections_page_paginates(client):
+    respx.get("http://mock-storage/detections/count").mock(return_value=httpx.Response(200, json={"count": 600}))
+    rows = [{"frame_id": i, "label": "Rupture", "confidence": 0.9, "x": 1, "y": 1, "width": 2, "height": 2,
+             "video_time_seconds": 1.0, "detection_timestamp": "t"} for i in range(100)]
+    route = respx.get("http://mock-storage/detections").mock(return_value=httpx.Response(200, json=rows))
+
+    r = client.get("/detections?limit=500&page=2&label=Rupture")
+    assert r.status_code == 200
+    assert route.calls.last.request.url.params["offset"] == "500"
+    assert route.calls.last.request.url.params["limit"] == "500"
+    assert "501–600 of 600 matching" in r.text
+    assert "Prev" in r.text and "Next" not in r.text
+    assert "label=Rupture&amp;limit=500&amp;page=1" in r.text
+
+
+@respx.mock
+def test_detections_page_first_page_has_next_but_no_prev(client):
+    respx.get("http://mock-storage/detections/count").mock(return_value=httpx.Response(200, json={"count": 600}))
+    row = {"frame_id": 1, "label": "Rupture", "confidence": 0.9, "x": 1, "y": 1, "width": 2, "height": 2,
+           "video_time_seconds": 1.0, "detection_timestamp": "t"}
+    respx.get("http://mock-storage/detections").mock(return_value=httpx.Response(200, json=[row]))
+    r = client.get("/detections?limit=100")
+    assert "Next" in r.text and "Prev" not in r.text
+
+
+def test_page_items_collapses_long_ranges():
+    assert app_module._page_items(1, 1) == []
+    assert app_module._page_items(1, 3) == [1, 2, 3]
+    assert app_module._page_items(10, 20) == [1, None, 8, 9, 10, 11, 12, None, 20]

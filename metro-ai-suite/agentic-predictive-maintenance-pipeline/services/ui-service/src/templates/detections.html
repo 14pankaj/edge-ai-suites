@@ -50,7 +50,7 @@
 
     <section class="card">
       <h2>Detections
-        <span class="count-info">— showing {{ detections|length }}{% if total_count %} of {{ total_count }} total{% endif %}</span>
+        <span class="count-info">— showing {% if total_count and detections %}{{ first_row }}–{{ last_row }}{% else %}{{ detections|length }}{% endif %}{% if total_count %} of {{ total_count }} matching{% endif %}</span>
       </h2>
       {% if detections %}
       <table>
@@ -62,7 +62,7 @@
         <tbody>
           {% for d in detections %}
           <tr>
-            <td>{{ loop.index }}</td>
+            <td>{{ first_row + loop.index0 }}</td>
             <td>{{ d.frame_id }}</td>
             <td><span class="label-badge">{{ d.label }}</span></td>
             <td>
@@ -83,6 +83,17 @@
           {% endfor %}
         </tbody>
       </table>
+      {% if total_pages > 1 %}
+      <nav class="pagination" aria-label="Detections pages">
+        {% if page > 1 %}<a href="/detections?{{ base_query }}&amp;page={{ page - 1 }}" rel="prev">&#8249; Prev</a>{% endif %}
+        {% for p in page_items %}
+          {% if p is none %}<span class="page-gap">&hellip;</span>
+          {% elif p == page %}<span class="page-current" aria-current="page">{{ p }}</span>
+          {% else %}<a href="/detections?{{ base_query }}&amp;page={{ p }}">{{ p }}</a>{% endif %}
+        {% endfor %}
+        {% if page < total_pages %}<a href="/detections?{{ base_query }}&amp;page={{ page + 1 }}" rel="next">Next &#8250;</a>{% endif %}
+      </nav>
+      {% endif %}
       {% else %}
       <p class="empty">No detections match the current filter.</p>
       {% endif %}

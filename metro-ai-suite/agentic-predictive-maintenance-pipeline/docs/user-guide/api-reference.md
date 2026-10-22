@@ -16,8 +16,9 @@ pipeline.
 | `POST` | `/detections` | Insert a single detection record |
 | `POST` | `/detections/batch` | Bulk insert multiple detections |
 | `POST` | `/detections/query` | Run a validated structured query (list, count, aggregate, group-by, or frame summary) |
-| `GET` | `/detections` | Query detections — supports `label`, `min_confidence`, and `limit` filters |
+| `GET` | `/detections` | Query detections — supports `label`, `min_`/`max_confidence`, `min_`/`max_video_time`, `min_`/`max_id`, and `limit` (with `offset` for paging) filters |
 | `GET` | `/detections/summary` | Per-class detection statistics |
+| `GET` | `/detections/count` | Number of detections matching the same filters as `GET /detections` |
 | `DELETE` | `/detections` | Clear all stored detections |
 | `GET` | `/health` | Health check endpoint |
 | `GET` | `/metrics` | Prometheus metrics |
