@@ -38,22 +38,27 @@ function statusBadgeHtml(run) {
   return `<span class="status-badge status-${escapeHtml(run.status)}">${escapeHtml(run.status)}${suffix}</span>`;
 }
 
+// Icons come from the SVG sprite in templates/index.html.
+function runIcon(name) {
+  return `<svg class="run-icon" aria-hidden="true"><use href="#icon-${name}"/></svg>`;
+}
+
 function runActionHtml(run, activeRun) {
   const runPath = encodeURIComponent(run.run_id);
   let links;
   if (run.status === "completed") {
-    links = `<a href="/results/${runPath}">View Results</a><span aria-hidden="true"> · </span>`
-      + `<a href="/chat?run_id=${runPath}">Ask about run</a>`;
+    links = `<a class="icon-button" href="/results/${runPath}" title="View results" aria-label="View results">${runIcon("view")}</a>`
+      + `<a class="icon-button" href="/chat?run_id=${runPath}" title="Ask about this run" aria-label="Ask about this run">${runIcon("ask")}</a>`;
   } else if (run.status === "running") {
-    links = `<a href="/results/${runPath}">Waiting…</a>`;
+    links = `<a class="icon-button" href="/results/${runPath}" title="Run in progress" aria-label="Run in progress">${runIcon("view")}</a>`;
   } else {
-    links = `<a href="/results/${runPath}">View Error</a>`;
+    links = `<a class="icon-button" href="/results/${runPath}" title="View error" aria-label="View error">${runIcon("view")}</a>`;
   }
   const action = window.__runAgainAction || "/run";
   const disabled = activeRun ? "disabled" : "";
-  return `${links}<span aria-hidden="true"> · </span>`
+  return `${links}`
     + `<form method="POST" action="${escapeHtml(action)}" class="run-again-form">`
-    + `<button type="submit" class="btn-link run-again-btn" ${disabled} onclick="event.stopPropagation();">&#8635; Run again</button>`
+    + `<button type="submit" class="icon-button run-again-btn" title="Run again" aria-label="Run again" ${disabled} onclick="event.stopPropagation();">${runIcon("rerun")}</button>`
     + `</form>`;
 }
 

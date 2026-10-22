@@ -11,6 +11,12 @@
   <noscript><meta http-equiv="refresh" content="15"></noscript>
 </head>
 <body>
+  {# Icon sprite: the single source for the run-action icons, also used by static/js/live-status.js. #}
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="icon-view" viewBox="0 0 16 16"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/></symbol>
+    <symbol id="icon-ask" viewBox="0 0 16 16"><path d="M2 3h12v8H7l-3 3v-3H2z"/></symbol>
+    <symbol id="icon-rerun" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2v3h-3"/></symbol>
+  </svg>
   <header>
     <div class="header-inner">
       <h1>Agentic Predictive Maintenance</h1>
@@ -26,7 +32,7 @@
   <nav aria-label="Primary navigation">
     <a href="/" class="active" aria-current="page">Dashboard</a>
     <a href="/detections">Detections</a>
-    <a href="/chat">Ask &amp; Analyze</a>
+    <a class="icon-button" href="/chat">Ask &amp; Analyze</a>
   </nav>
 
   <div class="dashboard-grid">
@@ -260,18 +266,16 @@
               <td>
                 <div class="run-actions">
                 {% if run.status == "completed" %}
-                <a href="/results/{{ run.run_id }}">View Results</a>
-                <span aria-hidden="true"> · </span>
-                <a href="/chat?run_id={{ run.run_id | urlencode }}">Ask about run</a>
+                <a class="icon-button" href="/results/{{ run.run_id }}" title="View results" aria-label="View results"><svg class="run-icon" aria-hidden="true"><use href="#icon-view"/></svg></a>
+                <a class="icon-button" href="/chat?run_id={{ run.run_id | urlencode }}" title="Ask about this run" aria-label="Ask about this run"><svg class="run-icon" aria-hidden="true"><use href="#icon-ask"/></svg></a>
                 {% elif run.status == "running" %}
-                <a href="/results/{{ run.run_id }}">Waiting…</a>
+                <a class="icon-button" href="/results/{{ run.run_id }}" title="Run in progress" aria-label="Run in progress"><svg class="run-icon" aria-hidden="true"><use href="#icon-view"/></svg></a>
                 {% else %}
-                <a href="/results/{{ run.run_id }}">View Error</a>
+                <a class="icon-button" href="/results/{{ run.run_id }}" title="View error" aria-label="View error"><svg class="run-icon" aria-hidden="true"><use href="#icon-view"/></svg></a>
                 {% endif %}
-                <span aria-hidden="true"> · </span>
                 <form method="POST" action="{{ '/run-multimodal' if multimodal_enabled else '/run' }}" class="run-again-form">
-                  <button type="submit" class="btn-link run-again-btn" {{ 'disabled' if active_run else '' }}
-                    onclick="event.stopPropagation();">&#8635; Run again</button>
+                  <button type="submit" class="icon-button run-again-btn" title="Run again" aria-label="Run again" {{ 'disabled' if active_run else '' }}
+                    onclick="event.stopPropagation();"><svg class="run-icon" aria-hidden="true"><use href="#icon-rerun"/></svg></button>
                 </form>
                 </div>
               </td>

@@ -638,13 +638,29 @@ footer {
    wrapped content can still force the table wider than its card, bleeding
    past the card's right padding instead of respecting it. */
 #runs-table { table-layout: fixed; }
-#runs-table th:nth-child(1), #runs-table td:nth-child(1) { width: 34%; }
-#runs-table th:nth-child(2), #runs-table td:nth-child(2) { width: 28%; }
-#runs-table th:nth-child(3), #runs-table td:nth-child(3) { width: 38%; }
+#runs-table th:nth-child(1), #runs-table td:nth-child(1) { width: 33.33%; }
+#runs-table th:nth-child(2), #runs-table td:nth-child(2) { width: 33.33%; }
+#runs-table th:nth-child(3), #runs-table td:nth-child(3) { width: 33.33%; }
+/* Long phases ("running — detecting") wrap at spaces inside the cell instead of spilling into Actions. */
+#runs-table .status-badge { display: inline-block; max-width: 100%; overflow-wrap: normal; word-break: normal; line-height: 1.3; }
 #runs-table td { overflow-wrap: break-word; padding: 0.45rem 0.5rem; }
-.run-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; max-width: 100%; }
-.run-actions a, .run-actions .run-again-form, .run-actions .btn-link { white-space: nowrap; }
-.run-actions span[aria-hidden] { display: none; }
+/* Fixed 3-column grid; Run again is pinned to the last column so it stays put when Ask is absent. */
+.run-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 2rem)); align-items: center; gap: 0.25rem; }
+.run-actions .run-again-form { grid-column: 3; }
+.run-actions .icon-button {
+  width: 100%; height: auto; aspect-ratio: 1; text-decoration: none;
+  color: var(--accent);
+  background: transparent;
+}
+.run-actions .icon-button:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.run-icon { flex: none; width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.icon-button:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-link { display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: var(--radius); text-decoration: none; }
+.run-actions a:hover, .run-actions .btn-link:not(:disabled):hover { background: var(--surface-inset); }
+.run-actions .btn-link { border: 0; }
+.run-icon { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+/* Text stays in the DOM for screen readers; the hover title shows it visually. */
+.run-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .btn-link {
   background: none;
   border: none;
