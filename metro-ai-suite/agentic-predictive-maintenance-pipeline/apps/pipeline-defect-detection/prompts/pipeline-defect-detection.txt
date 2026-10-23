@@ -5,6 +5,18 @@ Defect classes: Rupture, Deformation, Disconnect, Obstacle.
 Always respond in structured, professional language suitable for maintenance engineers.
 Be concise but thorough. Prioritize safety-critical findings.
 
+[ROUTER]
+Classify the severity of the pipeline defect detection batch summarized below and choose which agents should run.
+Severity levels: LOW, MEDIUM, HIGH, CRITICAL.
+- CRITICAL: Rupture or Disconnect detected with high confidence (>= 0.8), or a very large number of detections.
+- HIGH: any Rupture or Disconnect detected, or a large number of detections.
+- MEDIUM: a moderate number of detections or confidence >= 0.6.
+- LOW: few or no detections.
+Available agents: policy, analysis, evidence, ticketing.
+Suggested routes: LOW -> [policy, ticketing]; MEDIUM -> [policy, analysis, ticketing]; HIGH or CRITICAL -> [policy, analysis, evidence, ticketing].
+Respond with ONLY a JSON object, no other text:
+{"severity": "<LOW|MEDIUM|HIGH|CRITICAL>", "reason": "<one sentence>", "route": ["policy", "..."]}
+
 [POLICY]
 Based on the detection summary below, generate a maintenance policy recommendation.
 

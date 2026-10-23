@@ -17,7 +17,7 @@
                         }
                     }
                 },
-                "pipeline": "{auto_source} name=source ! decodebin3 ! gvaclassify model=/home/pipeline-server/models/image/best.xml device=CPU inference-region=full-frame name=classification ! gvametaconvert add-empty-results=true name=metaconvert ! queue ! gvafpscounter ! appsink name=destination",
+                "pipeline": "{auto_source} name=source ! decodebin3 ! gvaclassify model=/home/pipeline-server/models/yolo_model_gas-detection/ultralytics/public/yolo11n/FP32/yolo11n.xml device=CPU threshold=0.4 name=classification ! gvametaconvert add-empty-results=true name=metaconvert ! queue ! gvafpscounter ! appsink name=destination",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -47,7 +47,7 @@
                         }
                     }
                 },
-                "pipeline": "{auto_source} name=source ! decodebin3 ! gvaclassify model=/home/pipeline-server/models/image/best.xml device=GPU inference-region=full-frame model-instance-id=inst_gpu name=classification ! gvametaconvert add-empty-results=true name=metaconvert ! queue ! gvafpscounter ! appsink name=destination",
+                "pipeline": "{auto_source} name=source ! decodebin3 ! gvaclassify model=/home/pipeline-server/models/yolo_model_gas-detection/ultralytics/public/yolo11n/FP32/yolo11n.xml device=GPU threshold=0.4 model-instance-id=inst_gpu name=classification ! gvametaconvert add-empty-results=true name=metaconvert ! queue ! gvafpscounter ! appsink name=destination",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -77,7 +77,37 @@
                         }
                     }
                 },
-                "pipeline": "{auto_source} name=source ! decodebin3 ! gvaclassify model=/home/pipeline-server/models/image/best.xml device=NPU inference-region=full-frame model-instance-id=inst_npu name=classification ! gvametaconvert add-empty-results=true name=metaconvert ! queue ! gvafpscounter ! appsink name=destination",
+                "pipeline": "{auto_source} name=source ! decodebin3 ! gvaclassify model=/home/pipeline-server/models/yolo_model_gas-detection/ultralytics/public/yolo11n/FP32/yolo11n.xml device=NPU threshold=0.4 model-instance-id=inst_npu name=classification ! gvametaconvert add-empty-results=true name=metaconvert ! queue ! gvafpscounter ! appsink name=destination",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "classification-properties": {
+                            "element": {
+                                "name": "classification",
+                                "format": "element-properties"
+                            }
+                        }
+                    }
+                },
+                "auto_start": false
+            },
+            {
+                "name": "gas_detection_yolov8n_cls_demo",
+                "source": "gstreamer",
+                "queue_maxsize": 50,
+                "payload": {
+                    "source": {
+                        "uri": "file:///home/pipeline-server/resources/videos/datastream.mp4",
+                        "type": "uri"
+                    },
+                    "destination": {
+                        "metadata": {
+                            "type": "mqtt",
+                            "topic": "apm/gas-image-classifications"
+                        }
+                    }
+                },
+                "pipeline": "{auto_source} name=source ! decodebin3 ! gvaclassify model=/home/pipeline-server/models/yolov8n_cls/yolov8n-cls.xml device=CPU inference-region=full-frame pre-process-backend=ie model-instance-id=inst_yolov8n_cls name=classification ! gvametaconvert add-empty-results=true name=metaconvert ! queue ! gvafpscounter ! appsink name=destination",
                 "parameters": {
                     "type": "object",
                     "properties": {

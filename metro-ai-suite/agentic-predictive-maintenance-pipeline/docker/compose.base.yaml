@@ -132,12 +132,12 @@ services:
       - no-new-privileges
 
   model-download:
-    image: ${REGISTRY:-intel/}model-download:${MODEL_DOWNLOAD_TAG:-2026.1.0}
+    image: ${REGISTRY:-intel/}model-download:${MODEL_DOWNLOAD_TAG:-latest}
     container_name: apm-model-download
     hostname: model-download
     # The model-download entrypoint only accepts the plugin list via the
     # --plugins CLI flag — it does not read an ENABLED_PLUGINS env var.
-    command: ["--plugins", "${MODEL_DOWNLOAD_PLUGINS:-huggingface,openvino}"]
+    command: ["--plugins", "${MODEL_DOWNLOAD_PLUGINS:-huggingface,openvino,ultralytics}"]
     environment:
       http_proxy: ${http_proxy:-}
       https_proxy: ${https_proxy:-}
